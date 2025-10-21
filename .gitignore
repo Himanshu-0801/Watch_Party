@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+*.egg-info/
+.env
+venv/
+ENV/
+env/
+.venv/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# IDE settings
+.vscode/
+.idea/
+
+# Render or deployment cache
+*.sqlite3
+*.db
+instance/
+.pytest_cache/
+
+# Local environment files
+.env.local
+.env.development
+.env.production
+.env.test
+
+# Node modules (if using JS frontend)
+node_modules/
+
+# Build / distribution
+build/
+dist/
+
