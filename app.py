@@ -1,16 +1,18 @@
+import os
 from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask_cors import CORS
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your-secret-key-change-this'
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-change-this')
 CORS(app)
 
 # Initialize SocketIO with proper settings
 socketio = SocketIO(app, 
                    cors_allowed_origins="*",
                    logger=True,
-                   engineio_logger=True)
+                   engineio_logger=True,
+                   async_mode='gevent')
 
 # Store active rooms and users
 rooms = {}
