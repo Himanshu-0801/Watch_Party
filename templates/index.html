@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Watch Party - Movie Together</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 20px;
+            text-align: center;
+            color: white;
+            backdrop-filter: blur(10px);
+        }
+
+        .header h1 {
+            font-size: 2em;
+            margin-bottom: 5px;
+        }
+
+        .header p {
+            opacity: 0.9;
+        }
+
+        .main-container {
+            display: flex;
+            flex: 1;
+            padding: 20px;
+            gap: 20px;
+            max-width: 1800px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        .video-section {
+            flex: 2;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .movie-player {
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .movie-player video {
+            width: 100%;
+            display: block;
+            max-height: 500px;
+        }
+
+        .player-controls {
+            background: rgba(0, 0, 0, 0.9);
+            padding: 15px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .player-controls button {
+            background: #667eea;
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .player-controls button:hover {
+            background: #764ba2;
+            transform: translateY(-2px);
+        }
+
+        .video-input {
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .video-input input {
+            width: 100%;
+            padding: 10px;
+            border: none;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+        }
+
+        .video-input input::placeholder {
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .video-chat-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+        }
+
+        .video-chat-box {
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 12px;
+            overflow: hidden;
+            position: relative;
+            aspect-ratio: 4/3;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .video-chat-box video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .video-chat-box .placeholder {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: white;
+            font-size: 48px;
+        }
+
+        .video-label {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .sidebar {
+            flex: 1;
+            min-width: 300px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .chat-section {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        .chat-section h3 {
+            margin-bottom: 15px;
+            color: #667eea;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            margin-bottom: 15px;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.05);
+            border-radius: 8px;
+            min-height: 200px;
+        }
+
+        .message {
+            margin-bottom: 10px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            background: white;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        .message .username {
+            font-weight: bold;
+            color: #667eea;
+            font-size: 12px;
+            margin-bottom: 3px;
+        }
+
+        .message .text {
+            color: #333;
+        }
+
+        .chat-input {
+            display: flex;
+            gap: 10px;
+        }
+
+        .chat-input input {
+            flex: 1;
+            padding: 10px;
+            border: 2px solid #667eea;
+            border-radius: 6px;
+            outline: none;
+        }
+
+        .chat-input button {
+            background: #667eea;
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .chat-input button:hover {
+            background: #764ba2;
+        }
+
+        .setup-section {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        .setup-section h3 {
+            margin-bottom: 15px;
+            color: #667eea;
+        }
+
+        .setup-section button {
+            width: 100%;
+            background: #667eea;
+            border: none;
+            color: white;
+            padding: 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 10px;
+            transition: all 0.3s;
+        }
+
+        .setup-section button:hover {
+            background: #764ba2;
+        }
+
+        .setup-section button.danger {
+            background: #dc3545;
+        }
+
+        .setup-section button.danger:hover {
+            background: #c82333;
+        }
+
+        .setup-section input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #667eea;
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+
+        .status {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            padding: 15px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ccc;
+        }
+
+        .status-indicator.active {
+            background: #4CAF50;
+            box-shadow: 0 0 10px #4CAF50;
+        }
+
+        @media (max-width: 1024px) {
+            .main-container {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🎬 Watch Party</h1>
+        <p>Watch movies together with friends</p>
+    </div>
+
+    <div class="main-container">
+        <div class="video-section">
+            <div class="movie-player">
+                <video id="moviePlayer" controls>
+                    Your browser doesn't support video playback.
+                </video>
+                <div class="player-controls">
+                    <button onclick="syncPlay()">▶ Sync Play</button>
+                    <button onclick="syncPause()">⏸ Sync Pause</button>
+                    <div class="video-input">
+                        <input type="text" id="videoUrl" placeholder="Enter direct video URL (.mp4, .webm)">
+                    </div>
+                    <button onclick="loadVideo()">Load URL</button>
+                    <input type="file" id="videoFile" accept="video/*" style="display: none;" onchange="loadLocalVideo()">
+                    <button onclick="document.getElementById('videoFile').click()">Upload Video</button>
+                </div>
+            </div>
+
+            <div class="video-chat-container">
+                <div class="video-chat-box">
+                    <video id="localVideo" autoplay muted></video>
+                    <div class="video-label">You</div>
+                </div>
+                <div class="video-chat-box">
+                    <video id="remoteVideo" autoplay></video>
+                    <div class="video-label">Friend</div>
+                    <div class="placeholder" id="remotePlaceholder">👤</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="sidebar">
+            <div class="setup-section">
+                <h3>🎥 Setup</h3>
+                <input type="text" id="username" placeholder="Enter your name">
+                <input type="text" id="roomCode" placeholder="Enter room code (or leave empty to create)">
+                <button onclick="joinRoom()">Join/Create Room</button>
+                <button onclick="startCamera()" id="startCameraBtn" style="display: none;">Start Camera & Mic</button>
+                <button onclick="stopCamera()" id="stopCameraBtn" style="display: none;" class="danger">Stop Camera & Mic</button>
+            </div>
+
+            <div class="status">
+                <h3 style="color: #667eea; margin-bottom: 10px;">Status</h3>
+                <div class="status-item">
+                    <div class="status-indicator" id="serverStatus"></div>
+                    <span>Server Connection</span>
+                </div>
+                <div class="status-item">
+                    <div class="status-indicator" id="roomStatus"></div>
+                    <span>Room: <span id="currentRoom">Not joined</span></span>
+                </div>
+                <div class="status-item">
+                    <div class="status-indicator" id="cameraStatus"></div>
+                    <span>Camera & Mic</span>
+                </div>
+                <div class="status-item">
+                    <span>👥 Users in room: <span id="userCount">0</span></span>
+                </div>
+            </div>
+
+            <div class="chat-section">
+                <h3>💬 Chat</h3>
+                <div class="chat-messages" id="chatMessages"></div>
+                <div class="chat-input">
+                    <input type="text" id="chatInput" placeholder="Type a message..." onkeypress="handleChatKeypress(event)">
+                    <button onclick="sendMessage()">Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let socket;
+        let localStream = null;
+        let peerConnection = null;
+        let username = 'User';
+        let currentRoom = null;
+        let remoteSid = null;
+
+        const configuration = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
+        };
+
+        // Initialize Socket.IO connection
+        function initSocket() {
+            try {
+                // Check if io is available
+                if (typeof io === 'undefined') {
+                    console.error('Socket.IO library not loaded!');
+                    addSystemMessage('ERROR: Socket.IO not loaded. Please refresh the page.');
+                    return;
+                }
+
+                console.log('Initializing Socket.IO connection...');
+                socket = io();
+
+                socket.on('connect', () => {
+                    console.log('Connected to server');
+                    document.getElementById('serverStatus').classList.add('active');
+                    addSystemMessage('✓ Connected to server!');
+                });
+
+                socket.on('disconnect', () => {
+                    console.log('Disconnected from server');
+                    document.getElementById('serverStatus').classList.remove('active');
+                    document.getElementById('roomStatus').classList.remove('active');
+                    addSystemMessage('✗ Disconnected from server');
+                });
+
+                socket.on('connected', (data) => {
+                    console.log('Received connected event:', data);
+                    addSystemMessage(data.message || 'Connected!');
+                });
+
+                socket.on('room_joined', (data) => {
+                    console.log('Room joined:', data);
+                    currentRoom = data.room_code;
+                    document.getElementById('currentRoom').textContent = currentRoom;
+                    document.getElementById('roomStatus').classList.add('active');
+                    document.getElementById('userCount').textContent = data.user_count;
+                    document.getElementById('startCameraBtn').style.display = 'block';
+                    addSystemMessage(`✓ Joined room: ${currentRoom}`);
+                    
+                    // Load video if available
+                    if (data.video_state && data.video_state.url) {
+                        document.getElementById('moviePlayer').src = data.video_state.url;
+                    }
+                });
+
+                socket.on('user_joined', (data) => {
+                    console.log('User joined:', data);
+                    document.getElementById('userCount').textContent = data.user_count;
+                    addSystemMessage(`${data.username} joined the room`);
+                    remoteSid = data.sid;
+                    
+                    // If we have camera on, initiate WebRTC connection
+                    if (localStream) {
+                        createPeerConnection(data.sid);
+                    }
+                });
+
+                socket.on('user_left', (data) => {
+                    console.log('User left:', data);
+                    document.getElementById('userCount').textContent = data.user_count;
+                    addSystemMessage('A user left the room');
+                    if (peerConnection) {
+                        peerConnection.close();
+                        peerConnection = null;
+                    }
+                });
+
+                socket.on('chat_message', (data) => {
+                    console.log('Chat message received:', data);
+                    addMessage(data.username, data.message);
+                });
+
+                socket.on('video_play', (data) => {
+                    console.log('Video play:', data);
+                    const player = document.getElementById('moviePlayer');
+                    if (data.time) player.currentTime = data.time;
+                    player.play();
+                    addSystemMessage(`${data.username || 'Someone'} started playing`);
+                });
+
+                socket.on('video_pause', (data) => {
+                    console.log('Video pause:', data);
+                    const player = document.getElementById('moviePlayer');
+                    if (data.time) player.currentTime = data.time;
+                    player.pause();
+                    addSystemMessage(`${data.username || 'Someone'} paused the video`);
+                });
+
+                socket.on('video_seek', (data) => {
+                    console.log('Video seek:', data);
+                    const player = document.getElementById('moviePlayer');
+                    player.currentTime = data.time;
+                });
+
+                socket.on('video_load', (data) => {
+                    console.log('Video load:', data);
+                    const player = document.getElementById('moviePlayer');
+                    player.src = data.url;
+                    player.load();
+                    addSystemMessage(`${data.username || 'Someone'} loaded a new video`);
+                });
+
+                // WebRTC signaling
+                socket.on('webrtc_offer', async (data) => {
+                    console.log('WebRTC offer received');
+                    remoteSid = data.sender_sid;
+                    await createPeerConnection(data.sender_sid);
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+                    const answer = await peerConnection.createAnswer();
+                    await peerConnection.setLocalDescription(answer);
+                    
+                    socket.emit('webrtc_answer', {
+                        room_code: currentRoom,
+                        target_sid: data.sender_sid,
+                        answer: answer
+                    });
+                });
+
+                socket.on('webrtc_answer', async (data) => {
+                    console.log('WebRTC answer received');
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+                });
+
+                socket.on('webrtc_ice_candidate', async (data) => {
+                    console.log('ICE candidate received');
+                    if (peerConnection && data.candidate) {
+                        await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                    }
+                });
+
+                console.log('Socket.IO initialized successfully');
+            } catch (error) {
+                console.error('Error initializing Socket.IO:', error);
+                addSystemMessage('ERROR: Failed to initialize connection - ' + error.message);
+            }
+        }
+
+        // Join or create room
+        function joinRoom() {
+            try {
+                if (!socket || !socket.connected) {
+                    alert('Not connected to server! Please wait and try again.');
+                    console.error('Socket not connected');
+                    return;
+                }
+
+                const nameInput = document.getElementById('username').value.trim();
+                const roomInput = document.getElementById('roomCode').value.trim();
+                
+                if (!nameInput) {
+                    alert('Please enter your name');
+                    return;
+                }
+                
+                username = nameInput;
+                const room = roomInput || 'ROOM-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+                
+                console.log('Joining room:', room, 'as', username);
+                
+                socket.emit('join_room', {
+                    room_code: room,
+                    username: username
+                });
+            } catch (error) {
+                console.error('Error joining room:', error);
+                alert('Error joining room: ' + error.message);
+            }
+        }
+
+        // Start camera and microphone
+        async function startCamera() {
+            try {
+                console.log('Starting camera...');
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    video: true,
+                    audio: true
+                });
+                
+                document.getElementById('localVideo').srcObject = localStream;
+                document.getElementById('cameraStatus').classList.add('active');
+                document.getElementById('startCameraBtn').style.display = 'none';
+                document.getElementById('stopCameraBtn').style.display = 'block';
+                addSystemMessage('✓ Camera and microphone started!');
+                
+                // If someone is already in room, create connection
+                if (remoteSid) {
+                    await createPeerConnection(remoteSid);
+                }
+            } catch (error) {
+                console.error('Camera error:', error);
+                alert('Could not access camera/microphone: ' + error.message);
+            }
+        }
+
+        // Stop camera and microphone
+        function stopCamera() {
+            try {
+                if (localStream) {
+                    localStream.getTracks().forEach(track => track.stop());
+                    document.getElementById('localVideo').srcObject = null;
+                    document.getElementById('cameraStatus').classList.remove('active');
+                    document.getElementById('startCameraBtn').style.display = 'block';
+                    document.getElementById('stopCameraBtn').style.display = 'none';
+                    localStream = null;
+                    
+                    if (peerConnection) {
+                        peerConnection.close();
+                        peerConnection = null;
+                    }
+                    
+                    addSystemMessage('Camera and microphone stopped.');
+                }
+            } catch (error) {
+                console.error('Error stopping camera:', error);
+            }
+        }
+
+        // WebRTC peer connection
+        async function createPeerConnection(targetSid) {
+            try {
+                console.log('Creating peer connection to:', targetSid);
+                peerConnection = new RTCPeerConnection(configuration);
+                
+                // Add local stream tracks
+                localStream.getTracks().forEach(track => {
+                    peerConnection.addTrack(track, localStream);
+                });
+                
+                // Handle remote stream
+                peerConnection.ontrack = (event) => {
+                    console.log('Remote track received');
+                    const remoteVideo = document.getElementById('remoteVideo');
+                    remoteVideo.srcObject = event.streams[0];
+                    document.getElementById('remotePlaceholder').style.display = 'none';
+                    addSystemMessage('✓ Friend\'s video connected!');
+                };
+                
+                // Handle ICE candidates
+                peerConnection.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        socket.emit('webrtc_ice_candidate', {
+                            target_sid: targetSid,
+                            candidate: event.candidate
+                        });
+                    }
+                };
+                
+                // Create and send offer
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+                
+                socket.emit('webrtc_offer', {
+                    room_code: currentRoom,
+                    target_sid: targetSid,
+                    offer: offer
+                });
+            } catch (error) {
+                console.error('Error creating peer connection:', error);
+                addSystemMessage('Error connecting video: ' + error.message);
+            }
+        }
+
+        // Load video from URL
+        function loadVideo() {
+            try {
+                const url = document.getElementById('videoUrl').value.trim();
+                if (!url) {
+                    alert('Please enter a video URL');
+                    return;
+                }
+                
+                if (!currentRoom) {
+                    alert('Please join a room first');
+                    return;
+                }
+                
+                console.log('Loading video:', url);
+                const player = document.getElementById('moviePlayer');
+                player.src = url;
+                player.load();
+                
+                socket.emit('video_load', {
+                    room_code: currentRoom,
+                    url: url,
+                    username: username
+                });
+                
+                addSystemMessage('Video loaded from URL');
+            } catch (error) {
+                console.error('Error loading video:', error);
+                alert('Error loading video: ' + error.message);
+            }
+        }
+
+        // Load local video file
+        function loadLocalVideo() {
+            try {
+                const fileInput = document.getElementById('videoFile');
+                const file = fileInput.files[0];
+                
+                if (!file) return;
+                
+                if (!currentRoom) {
+                    alert('Please join a room first');
+                    return;
+                }
+                
+                console.log('Loading local file:', file.name);
+                const player = document.getElementById('moviePlayer');
+                const url = URL.createObjectURL(file);
+                player.src = url;
+                player.load();
+                
+                addSystemMessage('Local video loaded: ' + file.name);
+                addSystemMessage('⚠ Note: Local files are not synced to other users!');
+            } catch (error) {
+                console.error('Error loading local video:', error);
+                alert('Error loading video file: ' + error.message);
+            }
+        }
+
+        // Sync play
+        function syncPlay() {
+            try {
+                if (!currentRoom) {
+                    alert('Please join a room first');
+                    return;
+                }
+                
+                const player = document.getElementById('moviePlayer');
+                player.play();
+                
+                console.log('Emitting video_play');
+                socket.emit('video_play', {
+                    room_code: currentRoom,
+                    time: player.currentTime,
+                    username: username
+                });
+            } catch (error) {
+                console.error('Error in syncPlay:', error);
+                alert('Error playing video: ' + error.message);
+            }
+        }
+
+        // Sync pause
+        function syncPause() {
+            try {
+                if (!currentRoom) {
+                    alert('Please join a room first');
+                    return;
+                }
+                
+                const player = document.getElementById('moviePlayer');
+                player.pause();
+                
+                console.log('Emitting video_pause');
+                socket.emit('video_pause', {
+                    room_code: currentRoom,
+                    time: player.currentTime,
+                    username: username
+                });
+            } catch (error) {
+                console.error('Error in syncPause:', error);
+                alert('Error pausing video: ' + error.message);
+            }
+        }
+
+        // Chat functions
+        function sendMessage() {
+            try {
+                const input = document.getElementById('chatInput');
+                const message = input.value.trim();
+                
+                if (!message) return;
+                
+                if (!currentRoom) {
+                    alert('Please join a room first');
+                    return;
+                }
+                
+                console.log('Sending message:', message);
+                socket.emit('chat_message', {
+                    room_code: currentRoom,
+                    username: username,
+                    message: message,
+                    timestamp: new Date().toISOString()
+                });
+                
+                input.value = '';
+            } catch (error) {
+                console.error('Error sending message:', error);
+                alert('Error sending message: ' + error.message);
+            }
+        }
+
+        function handleChatKeypress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        function addMessage(user, text) {
+            const messagesDiv = document.getElementById('chatMessages');
+            const messageEl = document.createElement('div');
+            messageEl.className = 'message';
+            messageEl.innerHTML = `
+                <div class="username">${escapeHtml(user)}</div>
+                <div class="text">${escapeHtml(text)}</div>
+            `;
+            messagesDiv.appendChild(messageEl);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function addSystemMessage(text) {
+            const messagesDiv = document.getElementById('chatMessages');
+            const messageEl = document.createElement('div');
+            messageEl.className = 'message';
+            messageEl.style.background = '#f0f0f0';
+            messageEl.innerHTML = `<div class="text" style="color: #666; font-style: italic;">${escapeHtml(text)}</div>`;
+            messagesDiv.appendChild(messageEl);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        // Escape HTML to prevent XSS
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Initialize on page load
+        window.onload = () => {
+            console.log('Page loaded, initializing...');
+            initSocket();
+            addSystemMessage('🎬 Welcome to Watch Party!');
+            addSystemMessage('1. Enter your name and room code (or leave empty to create new room)');
+            addSystemMessage('2. Click "Join/Create Room"');
+            addSystemMessage('3. Start your camera to see each other');
+            addSystemMessage('4. Load a video and enjoy!');
+        };
+    </script>
+</body>
+</html>
