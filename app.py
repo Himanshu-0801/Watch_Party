@@ -1,3 +1,6 @@
+import eventlet
+eventlet.monkey_patch()
+
 import os
 from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit, join_room, leave_room
@@ -7,19 +10,21 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-change-this')
 CORS(app)
 
-# Initialize SocketIO with proper settings
-socketio = SocketIO(app, 
-                   cors_allowed_origins="*",
-                   logger=True,
-                   engineio_logger=True,
-                   async_mode='gevent')
+# Initialize SocketIO with eventlet async mode (avoid gevent/eventlet mix)
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    logger=True,
+    engineio_logger=True,
+    async_mode='eventlet'
+)
 
 # Store active rooms and users
 rooms = {}
 
 @app.route('/')
 def index():
-    print("Index route accessed")  # Debug print
+    print("Index route accessed")
     return render_template('index.html')
 
 # Test route to verify Flask is working
@@ -46,7 +51,7 @@ def handle_disconnect():
 
 @socketio.on('join_room')
 def handle_join_room(data):
-    print(f"Join room request: {data}")  # Debug print
+    print(f"Join room request: {data}")
     room_code = data['room_code']
     username = data['username']
     
@@ -99,7 +104,7 @@ def handle_leave_room(data):
 
 @socketio.on('chat_message')
 def handle_chat_message(data):
-    print(f"Chat message: {data}")  # Debug print
+    print(f"Chat message: {data}")
     room_code = data['room_code']
     username = data['username']
     message = data['message']
@@ -112,7 +117,7 @@ def handle_chat_message(data):
 
 @socketio.on('video_play')
 def handle_video_play(data):
-    print(f"Video play: {data}")  # Debug print
+    print(f"Video play: {data}")
     room_code = data['room_code']
     current_time = data.get('time', 0)
     
@@ -127,7 +132,7 @@ def handle_video_play(data):
 
 @socketio.on('video_pause')
 def handle_video_pause(data):
-    print(f"Video pause: {data}")  # Debug print
+    print(f"Video pause: {data}")
     room_code = data['room_code']
     current_time = data.get('time', 0)
     
@@ -154,7 +159,7 @@ def handle_video_seek(data):
 
 @socketio.on('video_load')
 def handle_video_load(data):
-    print(f"Video load: {data}")  # Debug print
+    print(f"Video load: {data}")
     room_code = data['room_code']
     video_url = data['url']
     
@@ -171,7 +176,7 @@ def handle_video_load(data):
 # WebRTC Signaling
 @socketio.on('webrtc_offer')
 def handle_webrtc_offer(data):
-    print(f"WebRTC offer from {request.sid}")  # Debug print
+    print(f"WebRTC offer from {request.sid}")
     target_sid = data['target_sid']
     
     emit('webrtc_offer', {
@@ -181,7 +186,7 @@ def handle_webrtc_offer(data):
 
 @socketio.on('webrtc_answer')
 def handle_webrtc_answer(data):
-    print(f"WebRTC answer from {request.sid}")  # Debug print
+    print(f"WebRTC answer from {request.sid}")
     target_sid = data['target_sid']
     
     emit('webrtc_answer', {
@@ -203,4 +208,5 @@ if __name__ == '__main__':
     print("Starting Watch Party Server...")
     print("Open your browser to: http://localhost:5000")
     print("=" * 50)
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True, allow_unsafe_werkzeug=True)
+    # Development run (eventlet)
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
