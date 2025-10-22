@@ -416,11 +416,11 @@
             iceCandidatePoolSize: 10
         };
 
-        // Setup WebRTC handlers for the current peerConnection
+        // --- Add/replace: setupPeerConnectionHandlers (place before initSocket) ---
         function setupPeerConnectionHandlers(targetSid) {
             if (!peerConnection) return;
 
-            // Ensure remoteStream exists and attach it to the remote video element
+            // Prepare remoteStream and attach to #remoteVideo
             if (!remoteStream) {
                 remoteStream = new MediaStream();
                 const remoteVideo = document.getElementById('remoteVideo');
@@ -430,40 +430,36 @@
                 remoteVideo.muted = false;
             }
 
-            // When remote track arrives, add it to remoteStream
             peerConnection.ontrack = (event) => {
-                console.log('ontrack event', event);
+                console.log('ontrack event, streams:', event.streams, 'track:', event.track);
                 if (event.streams && event.streams.length) {
                     event.streams.forEach(s => s.getTracks().forEach(t => {
-                        try { remoteStream.addTrack(t); } catch(e){/* ignore duplicate track errors */ }
+                        try { remoteStream.addTrack(t); } catch (e) { /* ignore duplicate add */ }
                     }));
                 } else if (event.track) {
-                    try { remoteStream.addTrack(event.track); } catch(e){/* ignore duplicates */ }
+                    try { remoteStream.addTrack(event.track); } catch (e) { /* ignore duplicate add */ }
                 }
-
                 const placeholder = document.getElementById('remotePlaceholder');
                 if (placeholder) placeholder.style.display = 'none';
             };
 
-            // Send ICE candidates to the signaling server
-            peerConnection.onicecandidate = (event) => {
-                if (event.candidate && socket && socket.connected) {
+            peerConnection.onicecandidate = (e) => {
+                if (e.candidate && socket && socket.connected) {
                     console.log('Sending ICE candidate to server');
                     socket.emit('webrtc_ice_candidate', {
                         room_code: currentRoom,
                         target_sid: targetSid,
-                        candidate: event.candidate
+                        candidate: e.candidate
                     });
                 }
             };
 
-            // Monitor connection states and cleanup on terminal states
             peerConnection.onconnectionstatechange = () => {
                 console.log('Peer connection state:', peerConnection.connectionState);
                 if (peerConnection.connectionState === 'disconnected' ||
                     peerConnection.connectionState === 'failed' ||
                     peerConnection.connectionState === 'closed') {
-                    try { peerConnection.close(); } catch(e){}
+                    try { peerConnection.close(); } catch(e) {}
                     peerConnection = null;
                 }
             };
@@ -519,51 +515,56 @@
                     }
                 });
 
+                // --- Replace socket.on('user_joined', ...) within initSocket() ---
                 socket.on('user_joined', (data) => {
                     console.log('User joined:', data);
-                    
+
+                    // Ignore notifications about ourselves if server broadcasts to everyone
+                    if (socket && socket.id && data.sid === socket.id) {
+                        console.log('Ignoring user_joined for myself');
+                        return;
+                    }
+
                     // Prevent duplicate notifications for same user
                     if (remoteSid === data.sid) {
                         console.log('User already connected, ignoring duplicate join event');
                         return;
                     }
-                    
+
                     document.getElementById('userCount').textContent = data.user_count;
                     addSystemMessage(`${data.username} joined the room`);
                     remoteSid = data.sid;
-                    
-                    // If we have camera on, wait a bit then initiate WebRTC connection
+
+                    // If we have local media, initiate connection to the newcomer
                     if (localStream && localStream.getTracks().length > 0) {
                         addSystemMessage('Connecting video call...');
-                        // Small delay to ensure both sides are ready
                         setTimeout(() => {
                             createPeerConnection(data.sid);
-                        }, 1000);
+                        }, 800);
                     } else {
                         addSystemMessage('Start your camera to connect video call');
                     }
                 });
 
+                // --- Replace socket.on('user_left', ...) within initSocket() ---
                 socket.on('user_left', (data) => {
                     console.log('User left:', data);
                     document.getElementById('userCount').textContent = data.user_count;
                     addSystemMessage('A user left the room');
-                    
-                    // Clean up peer connection
+
                     if (peerConnection) {
-                        peerConnection.close();
+                        try { peerConnection.close(); } catch (e) {}
                         peerConnection = null;
                     }
-                    
-                    // Clear remote video
+
                     const remoteVideo = document.getElementById('remoteVideo');
-                    if (remoteVideo) remoteVideo.srcObject = null;
+                    if (remoteVideo) {
+                        try { remoteVideo.srcObject = null; } catch(e) {}
+                    }
+                    remoteStream = null;
                     const placeholder = document.getElementById('remotePlaceholder');
                     if (placeholder) placeholder.style.display = 'flex';
-                    
-                    // Clear remote SID and remoteStream
                     remoteSid = null;
-                    remoteStream = null;
                 });
 
                 socket.on('chat_message', (data) => {
@@ -726,17 +727,17 @@
                 // Permissive ICE candidate receiver — add candidate if possible
                 socket.on('webrtc_ice_candidate', async (data) => {
                     try {
-                        console.log('ICE candidate received');
+                        console.log('ICE candidate received', !!data.candidate);
                         if (data.candidate) {
                             if (peerConnection) {
                                 try {
                                     await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
                                     console.log('Added remote ICE candidate');
                                 } catch (err) {
-                                    console.warn('Error adding ICE candidate (will ignore):', err);
+                                    console.warn('Error adding ICE candidate (ignored):', err);
                                 }
                             } else {
-                                console.warn('No peerConnection available yet to add ICE candidate');
+                                console.warn('No peerConnection yet — cannot add ICE candidate right now');
                             }
                         }
                     } catch (error) {
