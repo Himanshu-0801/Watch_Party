@@ -389,6 +389,7 @@
         let socket;
         let localStream = null;
         let peerConnection = null;
+        let remoteStream = null; // collects remote tracks
         let username = 'User';
         let currentRoom = null;
         let remoteSid = null;
@@ -414,6 +415,63 @@
             ],
             iceCandidatePoolSize: 10
         };
+
+        // Setup WebRTC handlers for the current peerConnection
+        function setupPeerConnectionHandlers(targetSid) {
+            if (!peerConnection) return;
+
+            // Ensure remoteStream exists and attach it to the remote video element
+            if (!remoteStream) {
+                remoteStream = new MediaStream();
+                const remoteVideo = document.getElementById('remoteVideo');
+                remoteVideo.srcObject = remoteStream;
+                remoteVideo.autoplay = true;
+                remoteVideo.playsInline = true;
+                remoteVideo.muted = false;
+            }
+
+            // When remote track arrives, add it to remoteStream
+            peerConnection.ontrack = (event) => {
+                console.log('ontrack event', event);
+                if (event.streams && event.streams.length) {
+                    event.streams.forEach(s => s.getTracks().forEach(t => {
+                        try { remoteStream.addTrack(t); } catch(e){/* ignore duplicate track errors */ }
+                    }));
+                } else if (event.track) {
+                    try { remoteStream.addTrack(event.track); } catch(e){/* ignore duplicates */ }
+                }
+
+                const placeholder = document.getElementById('remotePlaceholder');
+                if (placeholder) placeholder.style.display = 'none';
+            };
+
+            // Send ICE candidates to the signaling server
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate && socket && socket.connected) {
+                    console.log('Sending ICE candidate to server');
+                    socket.emit('webrtc_ice_candidate', {
+                        room_code: currentRoom,
+                        target_sid: targetSid,
+                        candidate: event.candidate
+                    });
+                }
+            };
+
+            // Monitor connection states and cleanup on terminal states
+            peerConnection.onconnectionstatechange = () => {
+                console.log('Peer connection state:', peerConnection.connectionState);
+                if (peerConnection.connectionState === 'disconnected' ||
+                    peerConnection.connectionState === 'failed' ||
+                    peerConnection.connectionState === 'closed') {
+                    try { peerConnection.close(); } catch(e){}
+                    peerConnection = null;
+                }
+            };
+
+            peerConnection.oniceconnectionstatechange = () => {
+                console.log('ICE connection state:', peerConnection.iceConnectionState);
+            };
+        }
 
         // Initialize Socket.IO connection
         function initSocket() {
@@ -499,11 +557,13 @@
                     
                     // Clear remote video
                     const remoteVideo = document.getElementById('remoteVideo');
-                    remoteVideo.srcObject = null;
-                    document.getElementById('remotePlaceholder').style.display = 'flex';
+                    if (remoteVideo) remoteVideo.srcObject = null;
+                    const placeholder = document.getElementById('remotePlaceholder');
+                    if (placeholder) placeholder.style.display = 'flex';
                     
-                    // Clear remote SID
+                    // Clear remote SID and remoteStream
                     remoteSid = null;
+                    remoteStream = null;
                 });
 
                 socket.on('chat_message', (data) => {
@@ -511,34 +571,84 @@
                     addMessage(data.username, data.message);
                 });
 
-                socket.on('video_play', (data) => {
-                    console.log('Video play:', data);
-                    const player = document.getElementById('moviePlayer');
-                    if (data.time) player.currentTime = data.time;
-                    player.play();
-                    addSystemMessage(`${data.username || 'Someone'} started playing`);
+                // Improved video handlers to wait for metadata + handle autoplay blocking
+                socket.on('video_play', async (data) => {
+                    try {
+                        console.log('Video play:', data);
+                        const player = document.getElementById('moviePlayer');
+                        const tryPlay = async () => {
+                            if (typeof data.time === 'number') {
+                                try { player.currentTime = data.time; } catch(e) { console.warn('seek error', e); }
+                            }
+                            try {
+                                await player.play();
+                            } catch (err) {
+                                console.warn('Autoplay blocked:', err);
+                                addSystemMessage('⚠ Autoplay blocked. Click Play or interact with the page to enable audio.');
+                            }
+                        };
+
+                        if (player.readyState < 1) {
+                            player.addEventListener('loadedmetadata', function _onMeta() {
+                                player.removeEventListener('loadedmetadata', _onMeta);
+                                tryPlay();
+                            });
+                        } else {
+                            tryPlay();
+                        }
+
+                        addSystemMessage(`${data.username || 'Someone'} started playing`);
+                    } catch (err) {
+                        console.error('Error handling video_play:', err);
+                    }
                 });
 
                 socket.on('video_pause', (data) => {
-                    console.log('Video pause:', data);
-                    const player = document.getElementById('moviePlayer');
-                    if (data.time) player.currentTime = data.time;
-                    player.pause();
-                    addSystemMessage(`${data.username || 'Someone'} paused the video`);
+                    try {
+                        console.log('Video pause:', data);
+                        const player = document.getElementById('moviePlayer');
+                        if (typeof data.time === 'number') {
+                            try { player.currentTime = data.time; } catch(e) { console.warn('seek error', e); }
+                        }
+                        player.pause();
+                        addSystemMessage(`${data.username || 'Someone'} paused the video`);
+                    } catch (err) {
+                        console.error('Error handling video_pause:', err);
+                    }
                 });
 
                 socket.on('video_seek', (data) => {
-                    console.log('Video seek:', data);
-                    const player = document.getElementById('moviePlayer');
-                    player.currentTime = data.time;
+                    try {
+                        console.log('Video seek:', data);
+                        const player = document.getElementById('moviePlayer');
+                        const seekTo = () => {
+                            if (typeof data.time === 'number') {
+                                try { player.currentTime = data.time; } catch (e) { console.warn('seek error', e); }
+                            }
+                        };
+                        if (player.readyState < 1) {
+                            player.addEventListener('loadedmetadata', function _onMeta() {
+                                player.removeEventListener('loadedmetadata', _onMeta);
+                                seekTo();
+                            });
+                        } else {
+                            seekTo();
+                        }
+                    } catch (err) {
+                        console.error('Error handling video_seek:', err);
+                    }
                 });
 
                 socket.on('video_load', (data) => {
-                    console.log('Video load:', data);
-                    const player = document.getElementById('moviePlayer');
-                    player.src = data.url;
-                    player.load();
-                    addSystemMessage(`${data.username || 'Someone'} loaded a new video`);
+                    try {
+                        console.log('Video load:', data);
+                        const player = document.getElementById('moviePlayer');
+                        player.src = data.url;
+                        player.load();
+                        addSystemMessage(`${data.username || 'Someone'} loaded a new video`);
+                    } catch (err) {
+                        console.error('Error handling video_load:', err);
+                    }
                 });
 
                 // WebRTC signaling
@@ -558,14 +668,14 @@
                         // Close existing connection if any
                         if (peerConnection) {
                             console.log('Closing existing peer connection before creating new one');
-                            peerConnection.close();
+                            try { peerConnection.close(); } catch(e){}
                         }
                         
                         // Create new peer connection
                         console.log('Creating peer connection for incoming offer');
                         peerConnection = new RTCPeerConnection(configuration);
                         
-                        // Set up connection monitoring
+                        // Set up connection monitoring and handlers
                         setupPeerConnectionHandlers(data.sender_sid);
                         
                         // Add local tracks
@@ -613,11 +723,21 @@
                     }
                 });
 
+                // Permissive ICE candidate receiver — add candidate if possible
                 socket.on('webrtc_ice_candidate', async (data) => {
                     try {
                         console.log('ICE candidate received');
-                        if (peerConnection && peerConnection.remoteDescription && data.candidate) {
-                            await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                        if (data.candidate) {
+                            if (peerConnection) {
+                                try {
+                                    await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                                    console.log('Added remote ICE candidate');
+                                } catch (err) {
+                                    console.warn('Error adding ICE candidate (will ignore):', err);
+                                }
+                            } else {
+                                console.warn('No peerConnection available yet to add ICE candidate');
+                            }
                         }
                     } catch (error) {
                         console.error('Error handling ICE candidate:', error);
@@ -676,7 +796,9 @@
                 document.getElementById('cameraStatus').classList.add('active');
                 document.getElementById('startCameraBtn').style.display = 'none';
                 document.getElementById('stopCameraBtn').style.display = 'block';
-                document.getElementById('reconnectBtn').style.display = 'block';
+                // reconnectBtn may not exist in DOM; guard access
+                const reconnectBtn = document.getElementById('reconnectBtn');
+                if (reconnectBtn) reconnectBtn.style.display = 'block';
                 addSystemMessage('✓ Camera and microphone started!');
                 
                 // If someone is already in room, create connection
