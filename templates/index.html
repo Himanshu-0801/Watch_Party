@@ -656,32 +656,121 @@
         /* ---------- CAMERA CONTROL ---------- */
         async function startCamera() {
           try {
-            dbg('startCamera request');
-            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-            document.getElementById('localVideo').srcObject = localStream;
-            document.getElementById('startCameraBtn').style.display = 'none';
-            document.getElementById('stopCameraBtn').style.display = 'inline-block';
-            addSystemMessage('Camera and mic started');
-            // If remote SID known, create connection attempt
-            if (remoteSid) {
-              dbg('remoteSid exists - creating PC to', remoteSid);
-              setTimeout(()=> createPeerConnection(remoteSid), 400);
+            dbg('startCamera: enumerating devices...');
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const videoDevices = devices.filter(d => d.kind === 'videoinput');
+
+            if (videoDevices.length === 0) {
+              dbg('No video input devices found');
+              alert('No camera detected on this device.');
+              return false;
             }
+
+            const constraints = { video: true, audio: true };
+            dbg('Requesting getUserMedia with constraints:', constraints);
+
+            try {
+              localStream = await navigator.mediaDevices.getUserMedia(constraints);
+            } catch (err) {
+              dbg('getUserMedia error:', err.name, err);
+              switch (err.name) {
+                case 'NotAllowedError':
+                case 'SecurityError':
+                  alert('Camera or microphone permission was denied. Please allow access in site permissions and reload the page.');
+                  return false;
+                case 'NotFoundError':
+                case 'OverconstrainedError':
+                  dbg('Camera not found or constrained -> trying audio-only fallback');
+                  try {
+                    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    addSystemMessage('Camera not available — using audio-only.');
+                  } catch (ae) {
+                    alert('Could not access camera or microphone. Make sure devices are connected and not in use by another application.');
+                    dbg('audio-only fallback failed:', ae);
+                    return false;
+                  }
+                  break;
+                case 'NotReadableError':
+                case 'TrackStartError':
+                  alert('Camera is already in use by another application. Close other apps/tabs and try again.');
+                  return false;
+                default:
+                  alert('Could not start camera: ' + (err.message || err.name));
+                  return false;
+              }
+            }
+
+            const localVideo = document.getElementById('localVideo');
+            if (localVideo) {
+              localVideo.srcObject = localStream;
+              localVideo.muted = true;
+              localVideo.play().catch(e => dbg('localVideo.play failed', e));
+            }
+
+            const sc = document.getElementById('startCameraBtn');
+            const st = document.getElementById('stopCameraBtn');
+            if (sc) sc.style.display = 'none';
+            if (st) st.style.display = 'inline-block';
+
+            addSystemMessage('✓ Camera and microphone started!');
+            dbg('startCamera: localStream ready, tracks:', localStream.getTracks().map(t => t.kind));
+
+            // populate device list labels now that permissions granted
+            populateDeviceList().catch(e => dbg('populateDeviceList failed', e));
+
+            if (remoteSid) {
+              dbg('startCamera: remoteSid exists, creating/negotiating PC', remoteSid);
+              setTimeout(() => createPeerConnection(remoteSid), 400);
+            }
+
+            return true;
           } catch (err) {
-            dbg('startCamera failed', err);
-            alert('Camera error: ' + err.message);
+            dbg('startCamera unexpected error', err);
+            alert('Unexpected error starting camera: ' + (err.message || err));
+            return false;
           }
         }
 
-        function stopCamera() {
-          if (localStream) {
-            localStream.getTracks().forEach(t => t.stop());
-            localStream = null;
-            document.getElementById('localVideo').srcObject = null;
-            document.getElementById('startCameraBtn').style.display = 'inline-block';
-            document.getElementById('stopCameraBtn').style.display = 'none';
-            addSystemMessage('Camera stopped');
-            cleanupPeer();
+        // helper: populate device select (call after load / after permission granted)
+        async function populateDeviceList() {
+          try {
+            const list = document.getElementById('videoDeviceSelect');
+            if (!list) return;
+            list.innerHTML = '';
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const videoDevices = devices.filter(d => d.kind === 'videoinput');
+            videoDevices.forEach((d, i) => {
+              const opt = document.createElement('option');
+              opt.value = d.deviceId;
+              opt.text = d.label || ('Camera ' + (i + 1));
+              list.appendChild(opt);
+            });
+            if (videoDevices.length === 0) {
+              const opt = document.createElement('option');
+              opt.value = '';
+              opt.text = 'No cameras found';
+              list.appendChild(opt);
+            }
+          } catch (e) {
+            dbg('populateDeviceList failed', e);
+          }
+        }
+
+        async function selectVideoDevice() {
+          const id = document.getElementById('videoDeviceSelect')?.value;
+          if (!id) return alert('Select a device first');
+          try {
+            if (localStream) {
+              localStream.getTracks().forEach(t => t.stop());
+              localStream = null;
+            }
+            localStream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: id } }, audio: true });
+            document.getElementById('localVideo').srcObject = localStream;
+            dbg('Selected device stream started');
+            if (remoteSid) setTimeout(() => createPeerConnection(remoteSid), 300);
+          } catch (err) {
+            dbg('selectVideoDevice error', err);
+            alert('Could not use that camera: ' + (err.message || err.name));
           }
         }
 
@@ -744,8 +833,9 @@
         window.onload = () => {
           initSocket();
           addSystemMessage('Welcome — open site in two devices, join same room, start cameras.');
-          // small UI tweaks
           setTimeout(()=>{ document.getElementById('username').value = 'User'+Math.floor(Math.random()*900); }, 300);
+          // populate device dropdown if present ( labels require permission in some browsers )
+          populateDeviceList().catch(()=>{ /* ignore */ });
         };
     </script>
 </body>
