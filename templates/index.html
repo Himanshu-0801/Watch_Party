@@ -398,406 +398,408 @@
 </div>
 
 <script>
-        /* ---------- DEBUG LOG HELPERS ---------- */
-        const logBuf = [];
-        function dbg(...args) {
-          const s = '[' + new Date().toLocaleTimeString() + '] ' + args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
-          logBuf.push(s);
-          const el = document.getElementById('debugLog');
-          el.innerText = logBuf.slice(-200).join('\n');
-          console.log(...args);
+/* ---------- DEBUG LOG HELPERS ---------- */
+const logBuf = [];
+function dbg(...args) {
+  const s = '[' + new Date().toLocaleTimeString() + '] ' + args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+  logBuf.push(s);
+  const el = document.getElementById('debugLog');
+  el.innerText = logBuf.slice(-200).join('\n');
+  console.log(...args);
+}
+function downloadLogs() {
+  const blob = new Blob([logBuf.join('\n')], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'watchparty-logs.txt';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ---------- SOCKET & WEBRTC GLOBALS ---------- */
+let socket = null;
+let localStream = null;
+let peerConnection = null;
+let remoteStream = null;
+let username = 'User';
+let currentRoom = null;
+let remoteSid = null;
+
+/* Negotiation helpers */
+let makingOffer = false;
+let polite = false;
+const pendingIceCandidates = [];
+const configuration = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' }
+  ],
+  iceCandidatePoolSize: 10
+};
+
+/* ---------- SOCKET INIT ---------- */
+function initSocket() {
+  if (typeof io === 'undefined') {
+    dbg('Socket.IO not loaded');
+    return;
+  }
+  dbg('initSocket...');
+  socket = io();
+
+  socket.on('connect', () => {
+    dbg('socket connect id=', socket.id);
+    addSystemMessage('Connected to server: ' + socket.id);
+  });
+
+  socket.on('disconnect', () => {
+    dbg('socket disconnect');
+    addSystemMessage('Disconnected from server');
+  });
+
+  socket.on('connected', (d) => { dbg('server connected event', d); });
+
+  socket.on('room_joined', (data) => {
+    dbg('room_joined', data);
+    currentRoom = data.room_code;
+    addSystemMessage('Joined room: ' + currentRoom);
+    document.getElementById('startCameraBtn').style.display = 'inline-block';
+  });
+
+  // When a user joins - server broadcasts
+  socket.on('user_joined', (data) => {
+    dbg('user_joined', data);
+    // ignore our own join notification if server broadcasts to everybody
+    if (socket && socket.id && data.sid === socket.id) {
+      dbg('ignored user_joined for ourselves');
+      return;
+    }
+    remoteSid = data.sid;
+    addSystemMessage(`${data.username} joined`);
+    // If both sides have local streams, attempt to make connection (onnegotiationneeded also handles)
+    if (localStream && localStream.getTracks().length) {
+      dbg('local stream present - createPeerConnection to', remoteSid);
+      // call after short timeout to allow both sides to prepare
+      setTimeout(()=> createPeerConnection(remoteSid), 500);
+    } else {
+      addSystemMessage('Start camera to connect video');
+    }
+  });
+
+  socket.on('user_left', (data) => {
+    dbg('user_left', data);
+    addSystemMessage('User left');
+    cleanupPeer();
+  });
+
+  socket.on('chat_message', (d) => dbg('chat_message', d));
+  socket.on('video_play', (d) => { try { const p = document.getElementById('moviePlayer'); if(typeof d.time === 'number') p.currentTime = d.time; p.play().catch(e=>dbg('autoplay blocked', e)); } catch(e){dbg(e)}; addSystemMessage('play'); });
+  socket.on('video_pause', (d) => { try { const p = document.getElementById('moviePlayer'); if(typeof d.time === 'number') p.currentTime = d.time; p.pause(); } catch(e){dbg(e)}; addSystemMessage('pause'); });
+  socket.on('video_load', (d) => { const p = document.getElementById('moviePlayer'); p.src = d.url; p.load(); addSystemMessage('video loaded'); dbg('video_load', d); });
+
+  // WebRTC signaling
+  socket.on('webrtc_offer', async (data) => {
+    dbg('webrtc_offer recv', data && data.sender_sid);
+    try {
+      const sender = data.sender_sid;
+      if (!sender) { dbg('offer has no sender'); return; }
+      // set role: polite if our socket.id > sender
+      polite = socket.id > sender;
+      const offerCollision = makingOffer || (peerConnection && peerConnection.signalingState !== 'stable');
+      const shouldIgnore = !polite && offerCollision;
+      if (shouldIgnore) {
+        dbg('ignoring offer due to collision and impolite', {polite, offerCollision});
+        return;
+      }
+      // create pc if missing
+      if (!peerConnection) await createPeerConnection(sender);
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+      dbg('set remote desc from offer');
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+      dbg('sending answer');
+      socket.emit('webrtc_answer', { room_code: currentRoom, target_sid: sender, answer: peerConnection.localDescription, sender_sid: socket.id });
+    } catch (err) {
+      dbg('error handling offer', err);
+    }
+  });
+
+  socket.on('webrtc_answer', async (data) => {
+    dbg('webrtc_answer recv', data && data.sender_sid);
+    try {
+      if (!peerConnection) { dbg('no pc for answer'); return; }
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+      dbg('set remote desc from answer');
+    } catch (err) {
+      dbg('error handling answer', err);
+    }
+  });
+
+  socket.on('webrtc_ice_candidate', async (data) => {
+    dbg('webrtc_ice_candidate recv', !!(data && data.candidate));
+    try {
+      if (!data || !data.candidate) return;
+      if (peerConnection) {
+        await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+        dbg('added ICE candidate');
+      } else {
+        pendingIceCandidates.push(data.candidate);
+        dbg('queued ICE candidate');
+      }
+    } catch (err) {
+      dbg('error adding ICE candidate', err);
+    }
+  });
+}
+
+/* ---------- CREATE / MANAGE PEER ---------- */
+async function createPeerConnection(targetSid) {
+  try {
+    dbg('createPeerConnection ->', targetSid);
+    // reuse existing if stable
+    if (peerConnection && peerConnection.connectionState !== 'closed') {
+      dbg('existing pc state', peerConnection.connectionState);
+      return;
+    }
+    peerConnection = new RTCPeerConnection(configuration);
+
+    // remote stream and element
+    if (!remoteStream) remoteStream = new MediaStream();
+    const remoteVideo = document.getElementById('remoteVideo');
+    remoteVideo.srcObject = remoteStream;
+    remoteVideo.muted = false;
+    document.getElementById('remotePlaceholder').style.display = 'none';
+
+    // add local tracks (if any)
+    if (localStream) {
+      localStream.getTracks().forEach(track => {
+        try { dbg('addTrack', track.kind); peerConnection.addTrack(track, localStream); } catch(e){dbg('addTrack failed', e);}
+      });
+    }
+
+    peerConnection.ontrack = (ev) => {
+      dbg('ontrack', ev);
+      if (ev.streams && ev.streams.length) {
+        ev.streams.forEach(s => s.getTracks().forEach(t => {
+          try { remoteStream.addTrack(t); } catch(e){}
+        }));
+      } else if (ev.track) {
+        try { remoteStream.addTrack(ev.track); } catch(e){}
+      }
+      document.getElementById('remotePlaceholder').style.display = 'none';
+    };
+
+    peerConnection.onicecandidate = (ev) => {
+      if (ev.candidate) {
+        dbg('onicecandidate local -> sending');
+        socket.emit('webrtc_ice_candidate', { room_code: currentRoom, target_sid: targetSid, candidate: ev.candidate, sender_sid: socket.id });
+      }
+    };
+
+    peerConnection.onnegotiationneeded = async () => {
+      dbg('onnegotiationneeded triggered');
+      try {
+        makingOffer = true;
+        // tie-break: only initiator (socket.id < targetSid) will create the offer
+        if (!(socket.id && targetSid && (socket.id < targetSid))) {
+          dbg('not initiator in tie-break; skipping creating offer');
+          makingOffer = false;
+          return;
         }
-        function downloadLogs() {
-          const blob = new Blob([logBuf.join('\n')], { type: 'text/plain' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = 'watchparty-logs.txt';
-          a.click();
-          URL.revokeObjectURL(url);
-        }
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        dbg('sending offer');
+        socket.emit('webrtc_offer', { room_code: currentRoom, target_sid: targetSid, offer: peerConnection.localDescription, sender_sid: socket.id });
+      } catch (err) {
+        dbg('negotiation error', err);
+      } finally {
+        makingOffer = false;
+      }
+    };
 
-        /* ---------- SOCKET & WEBRTC GLOBALS ---------- */
-        let socket;
-        let localStream = null;
-        let peerConnection = null;
-        let remoteStream = null;
-        let username = 'User';
-        let currentRoom = null;
-        let remoteSid = null;
+    peerConnection.onconnectionstatechange = () => {
+      dbg('pc connectionState', peerConnection.connectionState);
+      if (['closed','failed','disconnected'].includes(peerConnection.connectionState)) {
+        cleanupPeer();
+      }
+    };
 
-        /* Negotiation helpers */
-        let makingOffer = false;
-        let polite = false;
-        const pendingIceCandidates = [];
-        const configuration = {
-          iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-            { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' }
-          ],
-          iceCandidatePoolSize: 10
-        };
+    // drain queued ICE candidates
+    while (pendingIceCandidates.length) {
+      const c = pendingIceCandidates.shift();
+      try { await peerConnection.addIceCandidate(new RTCIceCandidate(c)); dbg('drained queued ICE candidate'); } catch(e){dbg('drain candidate error', e);}
+    }
 
-        /* ---------- SOCKET INIT ---------- */
-        function initSocket() {
-          if (typeof io === 'undefined') {
-            dbg('Socket.IO not loaded');
-            return;
-          }
-          dbg('initSocket...');
-          socket = io();
+    dbg('peerConnection ready');
+  } catch (err) {
+    dbg('createPeerConnection error', err);
+  }
+}
 
-          socket.on('connect', () => {
-            dbg('socket connect id=', socket.id);
-            addSystemMessage('Connected to server: ' + socket.id);
-          });
+function cleanupPeer() {
+  dbg('cleanupPeer running');
+  if (peerConnection) {
+    try { peerConnection.close(); } catch(e){}
+    peerConnection = null;
+  }
+  if (remoteStream) {
+    try { remoteStream.getTracks().forEach(t=>t.stop()); } catch(e){}
+    remoteStream = null;
+  }
+  const rv = document.getElementById('remoteVideo');
+  if (rv) rv.srcObject = null;
+  document.getElementById('remotePlaceholder').style.display = 'flex';
+  remoteSid = null;
+}
 
-          socket.on('disconnect', () => {
-            dbg('socket disconnect');
-            addSystemMessage('Disconnected from server');
-          });
+/* ---------- CAMERA CONTROL ---------- */
+async function startCamera() {
+  try {
+    dbg('startCamera: requesting camera & mic...');
+    // request camera + mic
+    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
 
-          socket.on('connected', (d) => { dbg('server connected event', d); });
+    // attach to local element
+    const localVideo = document.getElementById('localVideo');
+    if (localVideo) {
+      localVideo.srcObject = localStream;
+      localVideo.muted = true;
+      localVideo.play().catch(e => dbg('localVideo.play failed', e));
+    }
 
-          socket.on('room_joined', (data) => {
-            dbg('room_joined', data);
-            currentRoom = data.room_code;
-            addSystemMessage('Joined room: ' + currentRoom);
-            document.getElementById('startCameraBtn').style.display = 'inline-block';
-          });
+    const sc = document.getElementById('startCameraBtn');
+    const st = document.getElementById('stopCameraBtn');
+    if (sc) sc.style.display = 'none';
+    if (st) st.style.display = 'inline-block';
 
-          // When a user joins - server broadcasts
-          socket.on('user_joined', (data) => {
-            dbg('user_joined', data);
-            // ignore our own join notification if server broadcasts to everybody
-            if (socket && socket.id && data.sid === socket.id) {
-              dbg('ignored user_joined for ourselves');
-              return;
-            }
-            remoteSid = data.sid;
-            addSystemMessage(`${data.username} joined`);
-            // If both sides have local streams, attempt to make connection (onnegotiationneeded also handles)
-            if (localStream && localStream.getTracks().length) {
-              dbg('local stream present - createPeerConnection to', remoteSid);
-              // call after short timeout to allow both sides to prepare
-              setTimeout(()=> createPeerConnection(remoteSid), 500);
-            } else {
-              addSystemMessage('Start camera to connect video');
-            }
-          });
+    addSystemMessage('✓ Camera and microphone started!');
+    dbg('startCamera: localStream ready, tracks:', localStream.getTracks().map(t => t.kind));
 
-          socket.on('user_left', (data) => {
-            dbg('user_left', data);
-            addSystemMessage('User left');
-            cleanupPeer();
-          });
+    // populate device list labels now that permissions granted
+    populateDeviceList().catch(e => dbg('populateDeviceList failed', e));
 
-          socket.on('chat_message', (d) => dbg('chat_message', d));
-          socket.on('video_play', (d) => { try { const p = document.getElementById('moviePlayer'); if(typeof d.time === 'number') p.currentTime = d.time; p.play().catch(e=>dbg('autoplay blocked', e)); } catch(e){dbg(e)}; addSystemMessage('play'); });
-          socket.on('video_pause', (d) => { try { const p = document.getElementById('moviePlayer'); if(typeof d.time === 'number') p.currentTime = d.time; p.pause(); } catch(e){dbg(e)}; addSystemMessage('pause'); });
-          socket.on('video_load', (d) => { const p = document.getElementById('moviePlayer'); p.src = d.url; p.load(); addSystemMessage('video loaded'); dbg('video_load', d); });
+    if (remoteSid) {
+      dbg('startCamera: remoteSid exists, creating/negotiating PC', remoteSid);
+      setTimeout(() => createPeerConnection(remoteSid), 400);
+    }
 
-          // WebRTC signaling
-          socket.on('webrtc_offer', async (data) => {
-            dbg('webrtc_offer recv', data && data.sender_sid);
-            try {
-              const sender = data.sender_sid;
-              if (!sender) { dbg('offer has no sender'); return; }
-              // set role: polite if our socket.id > sender
-              polite = socket.id > sender;
-              const offerCollision = makingOffer || (peerConnection && peerConnection.signalingState !== 'stable');
-              const shouldIgnore = !polite && offerCollision;
-              if (shouldIgnore) {
-                dbg('ignoring offer due to collision and impolite', {polite, offerCollision});
-                return;
-              }
-              // create pc if missing
-              if (!peerConnection) await createPeerConnection(sender);
-              await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
-              dbg('set remote desc from offer');
-              const answer = await peerConnection.createAnswer();
-              await peerConnection.setLocalDescription(answer);
-              dbg('sending answer');
-              socket.emit('webrtc_answer', { room_code: currentRoom, target_sid: sender, answer: peerConnection.localDescription, sender_sid: socket.id });
-            } catch (err) {
-              dbg('error handling offer', err);
-            }
-          });
+    return true;
+  } catch (err) {
+    dbg('startCamera unexpected error', err);
+    alert('Unexpected error starting camera: ' + (err.message || err));
+    return false;
+  }
+}
 
-          socket.on('webrtc_answer', async (data) => {
-            dbg('webrtc_answer recv', data && data.sender_sid);
-            try {
-              if (!peerConnection) { dbg('no pc for answer'); return; }
-              await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-              dbg('set remote desc from answer');
-            } catch (err) {
-              dbg('error handling answer', err);
-            }
-          });
+// helper: populate device select (call after load / after permission granted)
+async function populateDeviceList() {
+  try {
+    const list = document.getElementById('videoDeviceSelect');
+    if (!list) return;
+    list.innerHTML = '';
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const videoDevices = devices.filter(d => d.kind === 'videoinput');
+    videoDevices.forEach((d, i) => {
+      const opt = document.createElement('option');
+      opt.value = d.deviceId;
+      opt.text = d.label || ('Camera ' + (i + 1));
+      list.appendChild(opt);
+    });
+    if (videoDevices.length === 0) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.text = 'No cameras found';
+      list.appendChild(opt);
+    }
+  } catch (e) {
+    dbg('populateDeviceList failed', e);
+  }
+}
 
-          socket.on('webrtc_ice_candidate', async (data) => {
-            dbg('webrtc_ice_candidate recv', !!(data && data.candidate));
-            try {
-              if (!data || !data.candidate) return;
-              if (peerConnection) {
-                await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-                dbg('added ICE candidate');
-              } else {
-                pendingIceCandidates.push(data.candidate);
-                dbg('queued ICE candidate');
-              }
-            } catch (err) {
-              dbg('error adding ICE candidate', err);
-            }
-          });
-        }
+async function selectVideoDevice() {
+  const id = document.getElementById('videoDeviceSelect')?.value;
+  if (!id) return alert('Select a device first');
+  try {
+    if (localStream) {
+      localStream.getTracks().forEach(t => t.stop());
+      localStream = null;
+    }
+    localStream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: id } }, audio: true });
+    document.getElementById('localVideo').srcObject = localStream;
+    dbg('Selected device stream started');
+    if (remoteSid) setTimeout(() => createPeerConnection(remoteSid), 300);
+  } catch (err) {
+    dbg('selectVideoDevice error', err);
+    alert('Could not use that camera: ' + (err.message || err.name));
+  }
+}
 
-        /* ---------- CREATE / MANAGE PEER ---------- */
-        async function createPeerConnection(targetSid) {
-          try {
-            dbg('createPeerConnection ->', targetSid);
-            // reuse existing if stable
-            if (peerConnection && peerConnection.connectionState !== 'closed') {
-              dbg('existing pc state', peerConnection.connectionState);
-              return;
-            }
-            peerConnection = new RTCPeerConnection(configuration);
+/* ---------- UI helpers ---------- */
+function addSystemMessage(txt) {
+  dbg('SYS: ' + txt);
+}
 
-            // remote stream and element
-            if (!remoteStream) remoteStream = new MediaStream();
-            const remoteVideo = document.getElementById('remoteVideo');
-            remoteVideo.srcObject = remoteStream;
-            remoteVideo.muted = false;
-            document.getElementById('remotePlaceholder').style.display = 'none';
+/* ---------- ROOM / CHAT / VIDEO CONTROL ---------- */
+function joinRoom() {
+  if (!socket || !socket.connected) { alert('Wait for socket to connect'); return; }
+  const name = document.getElementById('username').value.trim();
+  const rc = (document.getElementById('roomCode').value.trim()) || ('ROOM-'+Math.random().toString(36).slice(2,8).toUpperCase());
+  if (!name) { alert('Enter name'); return; }
+  username = name;
+  dbg('joining', rc);
+  socket.emit('join_room', { room_code: rc, username: name });
+}
 
-            // add local tracks (if any)
-            if (localStream) {
-              localStream.getTracks().forEach(track => {
-                try { dbg('addTrack', track.kind); peerConnection.addTrack(track, localStream); } catch(e){dbg('addTrack failed', e);}
-              });
-            }
+function loadVideo() {
+  const url = document.getElementById('videoUrl').value.trim();
+  if (!url || !currentRoom) { alert('Enter URL and join room'); return; }
+  const p = document.getElementById('moviePlayer');
+  p.src = url; p.load();
+  socket.emit('video_load', { room_code: currentRoom, url: url, username: username });
+  addSystemMessage('Video loaded');
+}
 
-            peerConnection.ontrack = (ev) => {
-              dbg('ontrack', ev);
-              if (ev.streams && ev.streams.length) {
-                ev.streams.forEach(s => s.getTracks().forEach(t => {
-                  try { remoteStream.addTrack(t); } catch(e){}
-                }));
-              } else if (ev.track) {
-                try { remoteStream.addTrack(ev.track); } catch(e){}
-              }
-              document.getElementById('remotePlaceholder').style.display = 'none';
-            };
+function syncPlay() {
+  if (!currentRoom) { alert('Join a room'); return; }
+  const p = document.getElementById('moviePlayer');
+  socket.emit('video_play', { room_code: currentRoom, time: p.currentTime, username });
+  try { p.play(); } catch(e) { dbg('play failed', e); }
+}
+function syncPause() {
+  if (!currentRoom) { alert('Join a room'); return; }
+  const p = document.getElementById('moviePlayer');
+  socket.emit('video_pause', { room_code: currentRoom, time: p.currentTime, username });
+  p.pause();
+}
 
-            peerConnection.onicecandidate = (ev) => {
-              if (ev.candidate) {
-                dbg('onicecandidate local -> sending');
-                socket.emit('webrtc_ice_candidate', { room_code: currentRoom, target_sid: targetSid, candidate: ev.candidate, sender_sid: socket.id });
-              }
-            };
+/* ---------- FORCE / DEBUG ---------- */
+async function forceRenegotiate() {
+  if (!peerConnection || !remoteSid) { dbg('Cannot renegotiate - pc or remoteSid missing'); return; }
+  dbg('force renegotiate triggered');
+  try {
+    makingOffer = true;
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+    socket.emit('webrtc_offer', { room_code: currentRoom, target_sid: remoteSid, offer: peerConnection.localDescription, sender_sid: socket.id });
+    dbg('force offer sent');
+  } catch (e) {
+    dbg('force reneg error', e);
+  } finally {
+    makingOffer = false;
+  }
+}
 
-            peerConnection.onnegotiationneeded = async () => {
-              dbg('onnegotiationneeded triggered');
-              try {
-                makingOffer = true;
-                // tie-break: only initiator (socket.id < targetSid) will create the offer
-                if (!(socket.id && targetSid && (socket.id < targetSid))) {
-                  dbg('not initiator in tie-break; skipping creating offer');
-                  makingOffer = false;
-                  return;
-                }
-                const offer = await peerConnection.createOffer();
-                await peerConnection.setLocalDescription(offer);
-                dbg('sending offer');
-                socket.emit('webrtc_offer', { room_code: currentRoom, target_sid: targetSid, offer: peerConnection.localDescription, sender_sid: socket.id });
-              } catch (err) {
-                dbg('negotiation error', err);
-              } finally {
-                makingOffer = false;
-              }
-            };
-
-            peerConnection.onconnectionstatechange = () => {
-              dbg('pc connectionState', peerConnection.connectionState);
-              if (['closed','failed','disconnected'].includes(peerConnection.connectionState)) {
-                cleanupPeer();
-              }
-            };
-
-            // drain queued ICE candidates
-            while (pendingIceCandidates.length) {
-              const c = pendingIceCandidates.shift();
-              try { await peerConnection.addIceCandidate(new RTCIceCandidate(c)); dbg('drained queued ICE candidate'); } catch(e){dbg('drain candidate error', e);}
-            }
-
-            dbg('peerConnection ready');
-          } catch (err) {
-            dbg('createPeerConnection error', err);
-          }
-        }
-
-        function cleanupPeer() {
-          dbg('cleanupPeer running');
-          if (peerConnection) {
-            try { peerConnection.close(); } catch(e){}
-            peerConnection = null;
-          }
-          if (remoteStream) {
-            try { remoteStream.getTracks().forEach(t=>t.stop()); } catch(e){}
-            remoteStream = null;
-          }
-          const rv = document.getElementById('remoteVideo');
-          if (rv) rv.srcObject = null;
-          document.getElementById('remotePlaceholder').style.display = 'flex';
-          remoteSid = null;
-        }
-
-        /* ---------- CAMERA CONTROL ---------- */
-        async function startCamera() {
-          try {
-            dbg('startCamera: requesting camera & mic...');
-            // request camera + mic
-            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-
-            // attach to local element
-            const localVideo = document.getElementById('localVideo');
-            if (localVideo) {
-              localVideo.srcObject = localStream;
-              localVideo.muted = true;
-              localVideo.play().catch(e => dbg('localVideo.play failed', e));
-            }
-
-            const sc = document.getElementById('startCameraBtn');
-            const st = document.getElementById('stopCameraBtn');
-            if (sc) sc.style.display = 'none';
-            if (st) st.style.display = 'inline-block';
-
-            addSystemMessage('✓ Camera and microphone started!');
-            dbg('startCamera: localStream ready, tracks:', localStream.getTracks().map(t => t.kind));
-
-            // populate device list labels now that permissions granted
-            populateDeviceList().catch(e => dbg('populateDeviceList failed', e));
-
-            if (remoteSid) {
-              dbg('startCamera: remoteSid exists, creating/negotiating PC', remoteSid);
-              setTimeout(() => createPeerConnection(remoteSid), 400);
-            }
-
-            return true;
-          } catch (err) {
-            dbg('startCamera unexpected error', err);
-            alert('Unexpected error starting camera: ' + (err.message || err));
-            return false;
-          }
-        }
-
-        // helper: populate device select (call after load / after permission granted)
-        async function populateDeviceList() {
-          try {
-            const list = document.getElementById('videoDeviceSelect');
-            if (!list) return;
-            list.innerHTML = '';
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            const videoDevices = devices.filter(d => d.kind === 'videoinput');
-            videoDevices.forEach((d, i) => {
-              const opt = document.createElement('option');
-              opt.value = d.deviceId;
-              opt.text = d.label || ('Camera ' + (i + 1));
-              list.appendChild(opt);
-            });
-            if (videoDevices.length === 0) {
-              const opt = document.createElement('option');
-              opt.value = '';
-              opt.text = 'No cameras found';
-              list.appendChild(opt);
-            }
-          } catch (e) {
-            dbg('populateDeviceList failed', e);
-          }
-        }
-
-        async function selectVideoDevice() {
-          const id = document.getElementById('videoDeviceSelect')?.value;
-          if (!id) return alert('Select a device first');
-          try {
-            if (localStream) {
-              localStream.getTracks().forEach(t => t.stop());
-              localStream = null;
-            }
-            localStream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: id } }, audio: true });
-            document.getElementById('localVideo').srcObject = localStream;
-            dbg('Selected device stream started');
-            if (remoteSid) setTimeout(() => createPeerConnection(remoteSid), 300);
-          } catch (err) {
-            dbg('selectVideoDevice error', err);
-            alert('Could not use that camera: ' + (err.message || err.name));
-          }
-        }
-
-        /* ---------- UI helpers ---------- */
-        function addSystemMessage(txt) {
-          dbg('SYS: ' + txt);
-        }
-
-        /* ---------- ROOM / CHAT / VIDEO CONTROL ---------- */
-        function joinRoom() {
-          if (!socket || !socket.connected) { alert('Wait for socket to connect'); return; }
-          const name = document.getElementById('username').value.trim();
-          const rc = (document.getElementById('roomCode').value.trim()) || ('ROOM-'+Math.random().toString(36).slice(2,8).toUpperCase());
-          if (!name) { alert('Enter name'); return; }
-          username = name;
-          dbg('joining', rc);
-          socket.emit('join_room', { room_code: rc, username: name });
-        }
-
-        function loadVideo() {
-          const url = document.getElementById('videoUrl').value.trim();
-          if (!url || !currentRoom) { alert('Enter URL and join room'); return; }
-          const p = document.getElementById('moviePlayer');
-          p.src = url; p.load();
-          socket.emit('video_load', { room_code: currentRoom, url: url, username: username });
-          addSystemMessage('Video loaded');
-        }
-
-        function syncPlay() {
-          if (!currentRoom) { alert('Join a room'); return; }
-          const p = document.getElementById('moviePlayer');
-          socket.emit('video_play', { room_code: currentRoom, time: p.currentTime, username });
-          try { p.play(); } catch(e) { dbg('play failed', e); }
-        }
-        function syncPause() {
-          if (!currentRoom) { alert('Join a room'); return; }
-          const p = document.getElementById('moviePlayer');
-          socket.emit('video_pause', { room_code: currentRoom, time: p.currentTime, username });
-          p.pause();
-        }
-
-        /* ---------- FORCE / DEBUG ---------- */
-        async function forceRenegotiate() {
-          if (!peerConnection || !remoteSid) { dbg('Cannot renegotiate - pc or remoteSid missing'); return; }
-          dbg('force renegotiate triggered');
-          try {
-            makingOffer = true;
-            const offer = await peerConnection.createOffer();
-            await peerConnection.setLocalDescription(offer);
-            socket.emit('webrtc_offer', { room_code: currentRoom, target_sid: remoteSid, offer: peerConnection.localDescription, sender_sid: socket.id });
-            dbg('force offer sent');
-          } catch (e) {
-            dbg('force reneg error', e);
-          } finally {
-            makingOffer = false;
-          }
-        }
-
-        /* ---------- START ---------- */
-        window.onload = () => {
-          initSocket();
-          addSystemMessage('Welcome — open site in two devices, join same room, start cameras.');
-          setTimeout(()=>{ document.getElementById('username').value = 'User'+Math.floor(Math.random()*900); }, 300);
-          // populate device dropdown if present ( labels require permission in some browsers )
-          populateDeviceList().catch(()=>{ /* ignore */ });
-        };
-    </script>
+/* ---------- START ---------- */
+window.addEventListener('load', () => {
+    initSocket();
+    addSystemMessage('Welcome — ready. Join a room and start camera.');
+    setTimeout(()=>{ 
+        document.getElementById('username').value = 'User'+Math.floor(Math.random()*900); 
+    }, 300);
+    // populate device dropdown if present
+    populateDeviceList().catch(()=>{ /* ignore */ });
+});
+</script>
 </body>
 </html>
