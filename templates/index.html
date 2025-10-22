@@ -416,58 +416,203 @@
             iceCandidatePoolSize: 10
         };
 
-        // --- Add/replace: setupPeerConnectionHandlers (place before initSocket) ---
-        function setupPeerConnectionHandlers(targetSid) {
-            if (!peerConnection) return;
+        // --- BEGIN: Robust WebRTC negotiation & handlers (replace previous offer/answer/ice + pc setup) ---
 
-            // Prepare remoteStream and attach to #remoteVideo
-            if (!remoteStream) {
-                remoteStream = new MediaStream();
+        // Globals
+        let makingOffer = false;
+        let ignoreOffer = false;
+        let polite = false; // polite peer won't fight incoming offers
+        const pendingIceCandidates = []; // queue ICE candidates until RTCPeerConnection exists
+
+        // Replaced: createPeerConnection (robust version)
+        async function createPeerConnection(targetSid) {
+            try {
+                if (peerConnection && peerConnection.connectionState !== 'closed') {
+                    console.log('[PC] existing peerConnection state=', peerConnection.connectionState);
+                    return;
+                }
+
+                console.log('[PC] creating peerConnection for', targetSid);
+                peerConnection = new RTCPeerConnection(configuration);
+
+                // prepare remote stream and attach
+                if (!remoteStream) remoteStream = new MediaStream();
                 const remoteVideo = document.getElementById('remoteVideo');
                 remoteVideo.srcObject = remoteStream;
                 remoteVideo.autoplay = true;
                 remoteVideo.playsInline = true;
                 remoteVideo.muted = false;
-            }
 
-            peerConnection.ontrack = (event) => {
-                console.log('ontrack event, streams:', event.streams, 'track:', event.track);
-                if (event.streams && event.streams.length) {
-                    event.streams.forEach(s => s.getTracks().forEach(t => {
-                        try { remoteStream.addTrack(t); } catch (e) { /* ignore duplicate add */ }
-                    }));
-                } else if (event.track) {
-                    try { remoteStream.addTrack(event.track); } catch (e) { /* ignore duplicate add */ }
-                }
-                const placeholder = document.getElementById('remotePlaceholder');
-                if (placeholder) placeholder.style.display = 'none';
-            };
-
-            peerConnection.onicecandidate = (e) => {
-                if (e.candidate && socket && socket.connected) {
-                    console.log('Sending ICE candidate to server');
-                    socket.emit('webrtc_ice_candidate', {
-                        room_code: currentRoom,
-                        target_sid: targetSid,
-                        candidate: e.candidate
+                // add local tracks (if any)
+                if (localStream) {
+                    localStream.getTracks().forEach(track => {
+                        console.log('[PC] addTrack', track.kind);
+                        try { peerConnection.addTrack(track, localStream); } catch(e) {}
                     });
                 }
-            };
 
-            peerConnection.onconnectionstatechange = () => {
-                console.log('Peer connection state:', peerConnection.connectionState);
-                if (peerConnection.connectionState === 'disconnected' ||
-                    peerConnection.connectionState === 'failed' ||
-                    peerConnection.connectionState === 'closed') {
-                    try { peerConnection.close(); } catch(e) {}
-                    peerConnection = null;
+                // when remote tracks arrive
+                peerConnection.ontrack = (event) => {
+                    console.log('[PC] ontrack', event);
+                    if (event.streams && event.streams.length) {
+                        event.streams.forEach(s => s.getTracks().forEach(t => {
+                            try { remoteStream.addTrack(t); } catch(e) {}
+                        }));
+                    } else if (event.track) {
+                        try { remoteStream.addTrack(event.track); } catch(e) {}
+                    }
+                    const placeholder = document.getElementById('remotePlaceholder');
+                    if (placeholder) placeholder.style.display = 'none';
+                };
+
+                // send ICE candidates over socket
+                peerConnection.onicecandidate = (ev) => {
+                    if (ev.candidate) {
+                        console.log('[PC] sending ICE candidate');
+                        socket.emit('webrtc_ice_candidate', {
+                            room_code: currentRoom,
+                            target_sid: targetSid,
+                            candidate: ev.candidate,
+                            sender_sid: socket.id
+                        });
+                    }
+                };
+
+                // deterministic initiator: use socket.id vs targetSid
+                peerConnection.onnegotiationneeded = async () => {
+                    try {
+                        console.log('[PC] onnegotiationneeded - makingOffer?', makingOffer);
+                        makingOffer = true;
+                        const initiator = (socket.id < targetSid);
+                        if (!initiator) {
+                            console.log('[PC] not initiator (tie-break): skipping creating offer');
+                            makingOffer = false;
+                            return;
+                        }
+                        const offer = await peerConnection.createOffer();
+                        await peerConnection.setLocalDescription(offer);
+                        console.log('[PC] created offer, sending to', targetSid);
+                        socket.emit('webrtc_offer', {
+                            room_code: currentRoom,
+                            target_sid: targetSid,
+                            offer: peerConnection.localDescription,
+                            sender_sid: socket.id
+                        });
+                    } catch (err) {
+                        console.error('[PC] onnegotiationneeded error', err);
+                    } finally {
+                        makingOffer = false;
+                    }
+                };
+
+                peerConnection.onconnectionstatechange = () => {
+                    console.log('[PC] connectionState:', peerConnection.connectionState);
+                    if (peerConnection.connectionState === 'failed' ||
+                        peerConnection.connectionState === 'closed' ||
+                        peerConnection.connectionState === 'disconnected') {
+                        try { peerConnection.close(); } catch(e) {}
+                        peerConnection = null;
+                    }
+                };
+
+                // Drain queued ICE candidates
+                while (pendingIceCandidates.length) {
+                    const c = pendingIceCandidates.shift();
+                    try {
+                        await peerConnection.addIceCandidate(new RTCIceCandidate(c));
+                        console.log('[PC] added queued ICE candidate');
+                    } catch (e) {
+                        console.warn('[PC] error adding queued ICE candidate', e);
+                    }
                 }
-            };
 
-            peerConnection.oniceconnectionstatechange = () => {
-                console.log('ICE connection state:', peerConnection.iceConnectionState);
-            };
+                console.log('[PC] peerConnection ready');
+            } catch (err) {
+                console.error('[PC] createPeerConnection error', err);
+            }
         }
+
+        // Replaced socket handlers: offer / answer / ice (polite handling + queuing)
+
+        // webrtc_offer
+        socket && socket.on && socket.on('webrtc_offer', async (data) => {
+            try {
+                console.log('[S] webrtc_offer received from', data.sender_sid);
+                const sender = data.sender_sid;
+                if (!sender) {
+                    console.warn('[S] offer has no sender_sid - ignoring');
+                    return;
+                }
+
+                if (!remoteSid) remoteSid = sender;
+
+                // polite determination: higher id is polite (will not ignore)
+                polite = (socket.id > sender);
+
+                const offerCollision = (makingOffer || (peerConnection && peerConnection.signalingState !== 'stable'));
+                ignoreOffer = !polite && offerCollision;
+                if (ignoreOffer) {
+                    console.warn('[S] Ignoring incoming offer due to collision and impolite role');
+                    return;
+                }
+
+                if (!peerConnection) await createPeerConnection(sender);
+
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+                console.log('[S] set remote description from offer');
+
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+                console.log('[S] created answer, sending back to', sender);
+                socket.emit('webrtc_answer', {
+                    room_code: currentRoom,
+                    target_sid: sender,
+                    answer: peerConnection.localDescription,
+                    sender_sid: socket.id
+                });
+            } catch (err) {
+                console.error('[S] error handling webrtc_offer', err);
+            }
+        });
+
+        // webrtc_answer
+        socket && socket.on && socket.on('webrtc_answer', async (data) => {
+            try {
+                console.log('[S] webrtc_answer received from', data.sender_sid);
+                if (!peerConnection) {
+                    console.warn('[S] no peerConnection to set answer on yet');
+                    return;
+                }
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+                console.log('[S] set remote description from answer');
+            } catch (err) {
+                console.error('[S] error handling webrtc_answer', err);
+            }
+        });
+
+        // webrtc_ice_candidate (permissive + queue)
+        socket && socket.on && socket.on('webrtc_ice_candidate', async (data) => {
+            try {
+                if (!data || !data.candidate) return;
+                console.log('[S] webrtc_ice_candidate received (queued?)');
+
+                if (peerConnection) {
+                    try {
+                        await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                        console.log('[S] added ICE candidate');
+                    } catch (e) {
+                        console.warn('[S] error adding ICE candidate directly', e);
+                    }
+                } else {
+                    pendingIceCandidates.push(data.candidate);
+                    console.log('[S] queued ICE candidate until peerConnection exists');
+                }
+            } catch (err) {
+                console.error('[S] error handling webrtc_ice_candidate', err);
+            }
+        });
+
+        // --- END: Robust WebRTC negotiation & handlers ---
 
         // Initialize Socket.IO connection
         function initSocket() {
