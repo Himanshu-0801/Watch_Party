@@ -474,11 +474,15 @@
                     addSystemMessage(`${data.username} joined the room`);
                     remoteSid = data.sid;
                     
-                    // If we have camera on, initiate WebRTC connection
+                    // If we have camera on, wait a bit then initiate WebRTC connection
                     if (localStream && localStream.getTracks().length > 0) {
-                        createPeerConnection(data.sid);
+                        addSystemMessage('Connecting video call...');
+                        // Small delay to ensure both sides are ready
+                        setTimeout(() => {
+                            createPeerConnection(data.sid);
+                        }, 1000);
                     } else {
-                        console.log('Camera not started yet, waiting...');
+                        addSystemMessage('Start your camera to connect video call');
                     }
                 });
 
@@ -486,10 +490,20 @@
                     console.log('User left:', data);
                     document.getElementById('userCount').textContent = data.user_count;
                     addSystemMessage('A user left the room');
+                    
+                    // Clean up peer connection
                     if (peerConnection) {
                         peerConnection.close();
                         peerConnection = null;
                     }
+                    
+                    // Clear remote video
+                    const remoteVideo = document.getElementById('remoteVideo');
+                    remoteVideo.srcObject = null;
+                    document.getElementById('remotePlaceholder').style.display = 'flex';
+                    
+                    // Clear remote SID
+                    remoteSid = null;
                 });
 
                 socket.on('chat_message', (data) => {
@@ -530,35 +544,69 @@
                 // WebRTC signaling
                 socket.on('webrtc_offer', async (data) => {
                     try {
-                        console.log('WebRTC offer received');
+                        console.log('WebRTC offer received from:', data.sender_sid);
                         
                         // Only create connection if we have camera on
                         if (!localStream || !localStream.getTracks().length) {
                             console.log('Camera not started, ignoring WebRTC offer');
+                            addSystemMessage('⚠ Turn on camera to connect video call');
                             return;
                         }
                         
                         remoteSid = data.sender_sid;
-                        await createPeerConnection(data.sender_sid);
+                        
+                        // Close existing connection if any
+                        if (peerConnection) {
+                            console.log('Closing existing peer connection before creating new one');
+                            peerConnection.close();
+                        }
+                        
+                        // Create new peer connection
+                        console.log('Creating peer connection for incoming offer');
+                        peerConnection = new RTCPeerConnection(configuration);
+                        
+                        // Set up connection monitoring
+                        setupPeerConnectionHandlers(data.sender_sid);
+                        
+                        // Add local tracks
+                        localStream.getTracks().forEach(track => {
+                            console.log('Adding local track to answer:', track.kind);
+                            peerConnection.addTrack(track, localStream);
+                        });
+                        
+                        // Set remote description from offer
                         await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+                        console.log('Set remote description from offer');
+                        
+                        // Create answer
                         const answer = await peerConnection.createAnswer();
                         await peerConnection.setLocalDescription(answer);
+                        console.log('Created and set local answer');
                         
+                        // Send answer back
                         socket.emit('webrtc_answer', {
                             room_code: currentRoom,
                             target_sid: data.sender_sid,
                             answer: answer
                         });
+                        console.log('Sent WebRTC answer');
+                        
+                        addSystemMessage('Responding to video call...');
                     } catch (error) {
                         console.error('Error handling WebRTC offer:', error);
+                        addSystemMessage('Error connecting video: ' + error.message);
                     }
                 });
 
                 socket.on('webrtc_answer', async (data) => {
                     try {
-                        console.log('WebRTC answer received');
+                        console.log('WebRTC answer received from:', data.sender_sid);
                         if (peerConnection && peerConnection.signalingState !== 'stable') {
                             await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+                            console.log('Set remote description from answer');
+                            addSystemMessage('Video call handshake complete...');
+                        } else {
+                            console.log('Cannot set answer, connection state:', peerConnection?.signalingState);
                         }
                     } catch (error) {
                         console.error('Error handling WebRTC answer:', error);
@@ -628,11 +676,15 @@
                 document.getElementById('cameraStatus').classList.add('active');
                 document.getElementById('startCameraBtn').style.display = 'none';
                 document.getElementById('stopCameraBtn').style.display = 'block';
+                document.getElementById('reconnectBtn').style.display = 'block';
                 addSystemMessage('✓ Camera and microphone started!');
                 
                 // If someone is already in room, create connection
                 if (remoteSid) {
-                    await createPeerConnection(remoteSid);
+                    addSystemMessage('Connecting to friend...');
+                    setTimeout(() => {
+                        createPeerConnection(remoteSid);
+                    }, 1000);
                 }
             } catch (error) {
                 console.error('Camera error:', error);
@@ -681,70 +733,39 @@
                 // Verify we have local stream
                 if (!localStream || !localStream.getTracks().length) {
                     console.error('Cannot create peer connection: no local stream');
+                    addSystemMessage('⚠ Start camera first!');
                     return;
                 }
                 
                 console.log('Creating peer connection to:', targetSid);
                 peerConnection = new RTCPeerConnection(configuration);
                 
-                // Monitor connection state
-                peerConnection.onconnectionstatechange = () => {
-                    console.log('WebRTC connection state:', peerConnection.connectionState);
-                    if (peerConnection.connectionState === 'connected') {
-                        addSystemMessage('✓ Video call connected!');
-                    } else if (peerConnection.connectionState === 'failed') {
-                        addSystemMessage('✗ Video call failed. Try refreshing.');
-                    } else if (peerConnection.connectionState === 'disconnected') {
-                        addSystemMessage('Video call disconnected.');
-                    }
-                };
-                
-                // Monitor ICE connection state
-                peerConnection.oniceconnectionstatechange = () => {
-                    console.log('ICE connection state:', peerConnection.iceConnectionState);
-                };
+                // Set up all event handlers
+                setupPeerConnectionHandlers(targetSid);
                 
                 // Add local stream tracks
                 localStream.getTracks().forEach(track => {
-                    console.log('Adding track:', track.kind);
+                    console.log('Adding local track to offer:', track.kind);
                     peerConnection.addTrack(track, localStream);
                 });
                 
-                // Handle remote stream
-                peerConnection.ontrack = (event) => {
-                    console.log('Remote track received:', event.track.kind);
-                    const remoteVideo = document.getElementById('remoteVideo');
-                    if (!remoteVideo.srcObject) {
-                        remoteVideo.srcObject = event.streams[0];
-                    }
-                    document.getElementById('remotePlaceholder').style.display = 'none';
-                    addSystemMessage('✓ Friend\'s video connected!');
-                };
-                
-                // Handle ICE candidates
-                peerConnection.onicecandidate = (event) => {
-                    if (event.candidate) {
-                        console.log('Sending ICE candidate');
-                        socket.emit('webrtc_ice_candidate', {
-                            target_sid: targetSid,
-                            candidate: event.candidate
-                        });
-                    }
-                };
-                
                 // Create and send offer
+                console.log('Creating offer with audio and video');
                 const offer = await peerConnection.createOffer({
                     offerToReceiveAudio: true,
                     offerToReceiveVideo: true
                 });
                 await peerConnection.setLocalDescription(offer);
+                console.log('Created and set local offer');
                 
-                console.log('Sending WebRTC offer');
+                console.log('Sending WebRTC offer to:', targetSid);
                 socket.emit('webrtc_offer', {
                     room_code: currentRoom,
                     target_sid: targetSid,
                     offer: offer
                 });
+                
+                addSystemMessage('Initiating video call...');
             } catch (error) {
                 console.error('Error creating peer connection:', error);
                 addSystemMessage('Error connecting video: ' + error.message);
