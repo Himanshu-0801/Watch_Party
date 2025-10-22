@@ -396,8 +396,23 @@
         const configuration = {
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' }
-            ]
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' },
+                { urls: 'stun:stun4.l.google.com:19302' },
+                // Free TURN server (for better connectivity)
+                {
+                    urls: 'turn:openrelay.metered.ca:80',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                }
+            ],
+            iceCandidatePoolSize: 10
         };
 
         // Initialize Socket.IO connection
@@ -448,13 +463,22 @@
 
                 socket.on('user_joined', (data) => {
                     console.log('User joined:', data);
+                    
+                    // Prevent duplicate notifications for same user
+                    if (remoteSid === data.sid) {
+                        console.log('User already connected, ignoring duplicate join event');
+                        return;
+                    }
+                    
                     document.getElementById('userCount').textContent = data.user_count;
                     addSystemMessage(`${data.username} joined the room`);
                     remoteSid = data.sid;
                     
                     // If we have camera on, initiate WebRTC connection
-                    if (localStream) {
+                    if (localStream && localStream.getTracks().length > 0) {
                         createPeerConnection(data.sid);
+                    } else {
+                        console.log('Camera not started yet, waiting...');
                     }
                 });
 
@@ -505,29 +529,50 @@
 
                 // WebRTC signaling
                 socket.on('webrtc_offer', async (data) => {
-                    console.log('WebRTC offer received');
-                    remoteSid = data.sender_sid;
-                    await createPeerConnection(data.sender_sid);
-                    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
-                    const answer = await peerConnection.createAnswer();
-                    await peerConnection.setLocalDescription(answer);
-                    
-                    socket.emit('webrtc_answer', {
-                        room_code: currentRoom,
-                        target_sid: data.sender_sid,
-                        answer: answer
-                    });
+                    try {
+                        console.log('WebRTC offer received');
+                        
+                        // Only create connection if we have camera on
+                        if (!localStream || !localStream.getTracks().length) {
+                            console.log('Camera not started, ignoring WebRTC offer');
+                            return;
+                        }
+                        
+                        remoteSid = data.sender_sid;
+                        await createPeerConnection(data.sender_sid);
+                        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+                        const answer = await peerConnection.createAnswer();
+                        await peerConnection.setLocalDescription(answer);
+                        
+                        socket.emit('webrtc_answer', {
+                            room_code: currentRoom,
+                            target_sid: data.sender_sid,
+                            answer: answer
+                        });
+                    } catch (error) {
+                        console.error('Error handling WebRTC offer:', error);
+                    }
                 });
 
                 socket.on('webrtc_answer', async (data) => {
-                    console.log('WebRTC answer received');
-                    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+                    try {
+                        console.log('WebRTC answer received');
+                        if (peerConnection && peerConnection.signalingState !== 'stable') {
+                            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+                        }
+                    } catch (error) {
+                        console.error('Error handling WebRTC answer:', error);
+                    }
                 });
 
                 socket.on('webrtc_ice_candidate', async (data) => {
-                    console.log('ICE candidate received');
-                    if (peerConnection && data.candidate) {
-                        await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                    try {
+                        console.log('ICE candidate received');
+                        if (peerConnection && peerConnection.remoteDescription && data.candidate) {
+                            await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                        }
+                    } catch (error) {
+                        console.error('Error handling ICE candidate:', error);
                     }
                 });
 
@@ -621,19 +666,57 @@
         // WebRTC peer connection
         async function createPeerConnection(targetSid) {
             try {
+                // Check if we already have a connection to this peer
+                if (peerConnection && peerConnection.connectionState !== 'closed' && peerConnection.connectionState !== 'failed') {
+                    console.log('Peer connection already exists in state:', peerConnection.connectionState);
+                    return;
+                }
+                
+                // Close old connection if exists
+                if (peerConnection) {
+                    console.log('Closing old peer connection');
+                    peerConnection.close();
+                }
+                
+                // Verify we have local stream
+                if (!localStream || !localStream.getTracks().length) {
+                    console.error('Cannot create peer connection: no local stream');
+                    return;
+                }
+                
                 console.log('Creating peer connection to:', targetSid);
                 peerConnection = new RTCPeerConnection(configuration);
                 
+                // Monitor connection state
+                peerConnection.onconnectionstatechange = () => {
+                    console.log('WebRTC connection state:', peerConnection.connectionState);
+                    if (peerConnection.connectionState === 'connected') {
+                        addSystemMessage('✓ Video call connected!');
+                    } else if (peerConnection.connectionState === 'failed') {
+                        addSystemMessage('✗ Video call failed. Try refreshing.');
+                    } else if (peerConnection.connectionState === 'disconnected') {
+                        addSystemMessage('Video call disconnected.');
+                    }
+                };
+                
+                // Monitor ICE connection state
+                peerConnection.oniceconnectionstatechange = () => {
+                    console.log('ICE connection state:', peerConnection.iceConnectionState);
+                };
+                
                 // Add local stream tracks
                 localStream.getTracks().forEach(track => {
+                    console.log('Adding track:', track.kind);
                     peerConnection.addTrack(track, localStream);
                 });
                 
                 // Handle remote stream
                 peerConnection.ontrack = (event) => {
-                    console.log('Remote track received');
+                    console.log('Remote track received:', event.track.kind);
                     const remoteVideo = document.getElementById('remoteVideo');
-                    remoteVideo.srcObject = event.streams[0];
+                    if (!remoteVideo.srcObject) {
+                        remoteVideo.srcObject = event.streams[0];
+                    }
                     document.getElementById('remotePlaceholder').style.display = 'none';
                     addSystemMessage('✓ Friend\'s video connected!');
                 };
@@ -641,6 +724,7 @@
                 // Handle ICE candidates
                 peerConnection.onicecandidate = (event) => {
                     if (event.candidate) {
+                        console.log('Sending ICE candidate');
                         socket.emit('webrtc_ice_candidate', {
                             target_sid: targetSid,
                             candidate: event.candidate
@@ -649,9 +733,13 @@
                 };
                 
                 // Create and send offer
-                const offer = await peerConnection.createOffer();
+                const offer = await peerConnection.createOffer({
+                    offerToReceiveAudio: true,
+                    offerToReceiveVideo: true
+                });
                 await peerConnection.setLocalDescription(offer);
                 
+                console.log('Sending WebRTC offer');
                 socket.emit('webrtc_offer', {
                     room_code: currentRoom,
                     target_sid: targetSid,
@@ -839,7 +927,8 @@
             addSystemMessage('1. Enter your name and room code (or leave empty to create new room)');
             addSystemMessage('2. Click "Join/Create Room"');
             addSystemMessage('3. Start your camera to see each other');
-            addSystemMessage('4. Load a video and enjoy!');
+            addSystemMessage('4. Load a video URL (NOT YouTube) and enjoy!');
+            addSystemMessage('⚠ Note: Local uploaded files are NOT synced to other users!');
         };
     </script>
 </body>
