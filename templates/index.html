@@ -656,50 +656,11 @@
         /* ---------- CAMERA CONTROL ---------- */
         async function startCamera() {
           try {
-            dbg('startCamera: enumerating devices...');
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            const videoDevices = devices.filter(d => d.kind === 'videoinput');
+            dbg('startCamera: requesting camera & mic...');
+            // request camera + mic
+            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
 
-            if (videoDevices.length === 0) {
-              dbg('No video input devices found');
-              alert('No camera detected on this device.');
-              return false;
-            }
-
-            const constraints = { video: true, audio: true };
-            dbg('Requesting getUserMedia with constraints:', constraints);
-
-            try {
-              localStream = await navigator.mediaDevices.getUserMedia(constraints);
-            } catch (err) {
-              dbg('getUserMedia error:', err.name, err);
-              switch (err.name) {
-                case 'NotAllowedError':
-                case 'SecurityError':
-                  alert('Camera or microphone permission was denied. Please allow access in site permissions and reload the page.');
-                  return false;
-                case 'NotFoundError':
-                case 'OverconstrainedError':
-                  dbg('Camera not found or constrained -> trying audio-only fallback');
-                  try {
-                    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    addSystemMessage('Camera not available — using audio-only.');
-                  } catch (ae) {
-                    alert('Could not access camera or microphone. Make sure devices are connected and not in use by another application.');
-                    dbg('audio-only fallback failed:', ae);
-                    return false;
-                  }
-                  break;
-                case 'NotReadableError':
-                case 'TrackStartError':
-                  alert('Camera is already in use by another application. Close other apps/tabs and try again.');
-                  return false;
-                default:
-                  alert('Could not start camera: ' + (err.message || err.name));
-                  return false;
-              }
-            }
-
+            // attach to local element
             const localVideo = document.getElementById('localVideo');
             if (localVideo) {
               localVideo.srcObject = localStream;
