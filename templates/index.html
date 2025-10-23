@@ -37,6 +37,25 @@
             opacity: 0.9;
         }
 
+        .connection-status {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            margin-top: 8px;
+            font-weight: bold;
+        }
+
+        .connection-status.connected {
+            background: #10b981;
+            color: white;
+        }
+
+        .connection-status.disconnected {
+            background: #ef4444;
+            color: white;
+        }
+
         .main-container {
             display: flex;
             flex: 1;
@@ -65,15 +84,6 @@
             width: 100%;
             display: block;
             max-height: 500px;
-        }
-
-        .player-controls {
-            background: rgba(0, 0, 0, 0.9);
-            padding: 15px;
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            flex-wrap: wrap;
         }
 
         .video-chat-container {
@@ -143,6 +153,11 @@
             font-size: 14px;
         }
 
+        .btn:disabled {
+            background: #94a3b8;
+            cursor: not-allowed;
+        }
+
         .btn.warn {
             background: #dc3545;
         }
@@ -163,6 +178,7 @@
 <div class="header">
   <h1>🎬 Watch Party — Debug Build</h1>
   <p>Use two browsers/devices. Watch the log panel for events.</p>
+  <div id="connectionStatus" class="connection-status disconnected">● Disconnected</div>
 </div>
 
 <div class="main-container">
@@ -193,7 +209,7 @@
       <div class="controls">
         <input id="username" class="input" placeholder="Your Name" style="width:150px;" />
         <input id="roomCode" class="input" placeholder="Room code (optional)" style="width:150px;" />
-        <button class="btn" onclick="joinRoom()">Join/Create Room</button>
+        <button class="btn" id="joinRoomBtn" onclick="joinRoom()">Join/Create Room</button>
         <button class="btn" id="startCameraBtn" onclick="startCamera()" style="display:none">Start Camera & Mic</button>
         <button class="btn warn" id="stopCameraBtn" onclick="stopCamera()" style="display:none">Stop Camera & Mic</button>
         <button class="btn orange" onclick="forceRenegotiate()">🔄 Reconnect</button>
@@ -216,9 +232,13 @@ function dbg(...args) {
   const s = '[' + new Date().toLocaleTimeString() + '] ' + args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
   logBuf.push(s);
   const el = document.getElementById('debugLog');
-  if (el) el.innerText = logBuf.slice(-300).join('\n');
+  if (el) {
+    el.innerText = logBuf.slice(-300).join('\n');
+    el.scrollTop = el.scrollHeight;
+  }
   console.log(...args);
 }
+
 function downloadLogs() {
   const blob = new Blob([logBuf.join('\n')], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
@@ -227,6 +247,14 @@ function downloadLogs() {
   a.download = 'watchparty-logs-' + Date.now() + '.txt';
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function updateConnectionStatus(connected) {
+  const el = document.getElementById('connectionStatus');
+  if (el) {
+    el.className = 'connection-status ' + (connected ? 'connected' : 'disconnected');
+    el.textContent = connected ? '● Connected' : '● Disconnected';
+  }
 }
 
 /* ---------- SOCKET & WEBRTC GLOBALS ---------- */
@@ -259,107 +287,141 @@ const configuration = {
 /* ---------- SOCKET INIT ---------- */
 function initSocket() {
   if (typeof io === 'undefined') {
-    dbg('Socket.IO not loaded');
+    dbg('❌ Socket.IO not loaded');
+    addSystemMessage('❌ Socket.IO library failed to load');
     return;
   }
-  dbg('initSocket...');
-  socket = io();
+  
+  dbg('🔌 Initializing socket connection...');
+  
+  // Connect to current origin (works for both local and deployed)
+  socket = io({
+    transports: ['websocket', 'polling'],
+    reconnection: true,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
+    reconnectionAttempts: 5
+  });
 
   socket.on('connect', () => {
-    dbg('socket connect id=', socket.id);
-    addSystemMessage('✓ Connected to server: ' + socket.id);
+    dbg('✅ Socket connected! ID:', socket.id);
+    addSystemMessage('✅ Connected to server: ' + socket.id);
+    updateConnectionStatus(true);
+    reconnectAttempts = 0;
   });
 
-  socket.on('disconnect', () => {
-    dbg('socket disconnect');
-    addSystemMessage('✗ Disconnected from server');
+  socket.on('disconnect', (reason) => {
+    dbg('❌ Socket disconnected:', reason);
+    addSystemMessage('❌ Disconnected: ' + reason);
+    updateConnectionStatus(false);
   });
 
-  socket.on('connected', (d) => { dbg('server connected event', d); });
+  socket.on('connect_error', (error) => {
+    dbg('❌ Connection error:', error.message);
+    addSystemMessage('❌ Connection error: ' + error.message);
+    updateConnectionStatus(false);
+  });
+
+  socket.on('reconnect_attempt', (attempt) => {
+    dbg('🔄 Reconnection attempt:', attempt);
+    addSystemMessage('🔄 Reconnecting... (attempt ' + attempt + ')');
+  });
+
+  socket.on('reconnect', (attempt) => {
+    dbg('✅ Reconnected after', attempt, 'attempts');
+    addSystemMessage('✅ Reconnected!');
+    updateConnectionStatus(true);
+  });
+
+  socket.on('connected', (d) => { 
+    dbg('📡 Server connected event:', d); 
+  });
 
   socket.on('room_joined', (data) => {
-    dbg('room_joined', data);
+    dbg('🚪 Room joined:', data);
     currentRoom = data.room_code;
-    addSystemMessage('✓ Joined room: ' + currentRoom);
+    addSystemMessage('✅ Joined room: ' + currentRoom);
     document.getElementById('startCameraBtn').style.display = 'inline-block';
+    document.getElementById('joinRoomBtn').disabled = true;
   });
 
-  // When a user joins - server broadcasts
   socket.on('user_joined', (data) => {
-    dbg('user_joined', data);
-    // ignore our own join notification
+    dbg('👋 User joined:', data);
     if (socket && socket.id && data.sid === socket.id) {
-      dbg('ignored user_joined for ourselves');
+      dbg('(Ignored own join notification)');
       return;
     }
     remoteSid = data.sid;
-    addSystemMessage(`${data.username} joined the room`);
-    // If both sides have local streams, attempt connection
+    addSystemMessage(`👋 ${data.username} joined the room`);
     if (localStream && localStream.getTracks().length) {
-      dbg('local stream present - will createPeerConnection to', remoteSid);
-      setTimeout(()=> createPeerConnection(remoteSid), 800);
+      dbg('📹 Local stream ready, creating peer connection...');
+      setTimeout(() => createPeerConnection(remoteSid), 800);
     } else {
-      addSystemMessage('⚠ Start camera to connect video');
+      addSystemMessage('⚠️ Start camera to connect video');
     }
   });
 
   socket.on('user_left', (data) => {
-    dbg('user_left', data);
-    addSystemMessage('User left the room');
+    dbg('👋 User left:', data);
+    addSystemMessage('👋 User left the room');
     cleanupPeer();
   });
 
-  socket.on('chat_message', (d) => dbg('chat_message', d));
+  socket.on('chat_message', (d) => dbg('💬 Chat:', d));
+  
   socket.on('video_play', (d) => { 
     try { 
       const p = document.getElementById('moviePlayer'); 
       if(typeof d.time === 'number') p.currentTime = d.time; 
-      p.play().catch(e=>dbg('autoplay blocked', e)); 
-      addSystemMessage('▶ Synced play');
-    } catch(e){dbg(e)}
+      p.play().catch(e => dbg('⚠️ Autoplay blocked:', e)); 
+      addSystemMessage('▶️ Video synced (play)');
+    } catch(e) { dbg('❌ Video play error:', e); }
   });
+  
   socket.on('video_pause', (d) => { 
     try { 
       const p = document.getElementById('moviePlayer'); 
       if(typeof d.time === 'number') p.currentTime = d.time; 
       p.pause(); 
-      addSystemMessage('⏸ Synced pause');
-    } catch(e){dbg(e)}
+      addSystemMessage('⏸️ Video synced (pause)');
+    } catch(e) { dbg('❌ Video pause error:', e); }
   });
+  
   socket.on('video_load', (d) => { 
     const p = document.getElementById('moviePlayer'); 
     p.src = d.url; 
     p.load(); 
-    addSystemMessage('Video loaded by ' + (d.username || 'someone')); 
-    dbg('video_load', d); 
+    addSystemMessage('📺 Video loaded by ' + (d.username || 'someone')); 
+    dbg('📺 Video load:', d); 
   });
 
   // WebRTC signaling
   socket.on('webrtc_offer', async (data) => {
-    dbg('webrtc_offer recv from', data && data.sender_sid);
+    dbg('📨 WebRTC offer received from:', data && data.sender_sid);
     try {
       const sender = data.sender_sid;
-      if (!sender) { dbg('offer has no sender'); return; }
+      if (!sender) { 
+        dbg('❌ Offer has no sender'); 
+        return; 
+      }
       
-      // Set politeness
       polite = socket.id > sender;
       const offerCollision = makingOffer || (peerConnection && peerConnection.signalingState !== 'stable');
       const shouldIgnore = !polite && offerCollision;
       
       if (shouldIgnore) {
-        dbg('ignoring offer due to collision (impolite)', {polite, offerCollision});
+        dbg('⚠️ Ignoring offer due to collision (impolite)');
         return;
       }
       
-      // Create pc if missing
       if (!peerConnection) await createPeerConnection(sender);
       
       await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
-      dbg('set remote desc from offer');
+      dbg('✅ Set remote description from offer');
       
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
-      dbg('created and set local answer');
+      dbg('✅ Created answer');
       
       socket.emit('webrtc_answer', { 
         room_code: currentRoom, 
@@ -367,24 +429,27 @@ function initSocket() {
         answer: peerConnection.localDescription, 
         sender_sid: socket.id 
       });
-      dbg('sent answer to', sender);
+      dbg('📤 Sent answer to:', sender);
     } catch (err) {
-      dbg('error handling offer', err);
+      dbg('❌ Error handling offer:', err);
     }
   });
 
   socket.on('webrtc_answer', async (data) => {
-    dbg('webrtc_answer recv from', data && data.sender_sid);
+    dbg('📨 WebRTC answer received from:', data && data.sender_sid);
     try {
-      if (!peerConnection) { dbg('no pc for answer'); return; }
+      if (!peerConnection) { 
+        dbg('❌ No peer connection for answer'); 
+        return; 
+      }
       if (peerConnection.signalingState === 'stable') {
-        dbg('already stable, ignoring answer');
+        dbg('⚠️ Already stable, ignoring answer');
         return;
       }
       await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-      dbg('set remote desc from answer');
+      dbg('✅ Set remote description from answer');
     } catch (err) {
-      dbg('error handling answer', err);
+      dbg('❌ Error handling answer:', err);
     }
   });
 
@@ -393,13 +458,13 @@ function initSocket() {
       if (!data || !data.candidate) return;
       if (peerConnection && peerConnection.remoteDescription) {
         await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-        dbg('added ICE candidate');
+        dbg('✅ Added ICE candidate');
       } else {
         pendingIceCandidates.push(data.candidate);
-        dbg('queued ICE candidate (no remote desc yet)');
+        dbg('📦 Queued ICE candidate');
       }
     } catch (err) {
-      dbg('error adding ICE candidate', err);
+      dbg('❌ Error adding ICE candidate:', err);
     }
   });
 }
@@ -407,59 +472,56 @@ function initSocket() {
 /* ---------- CREATE / MANAGE PEER ---------- */
 async function createPeerConnection(targetSid) {
   try {
-    dbg('createPeerConnection ->', targetSid);
+    dbg('🔗 Creating peer connection to:', targetSid);
     
-    // Close existing if any
     if (peerConnection) {
-      dbg('closing existing peerConnection', peerConnection.connectionState);
+      dbg('⚠️ Closing existing connection');
       peerConnection.close();
       peerConnection = null;
     }
     
     peerConnection = new RTCPeerConnection(configuration);
-    reconnectAttempts = 0; // Reset on new connection
+    reconnectAttempts = 0;
 
-    // Set up remote stream
     if (!remoteStream) remoteStream = new MediaStream();
     const remoteVideo = document.getElementById('remoteVideo');
     remoteVideo.srcObject = remoteStream;
     remoteVideo.muted = false;
 
-    // Add local tracks
     if (localStream) {
       localStream.getTracks().forEach(track => {
         try { 
-          dbg('addTrack', track.kind); 
+          dbg('➕ Adding track:', track.kind); 
           peerConnection.addTrack(track, localStream); 
-        } catch(e){
-          dbg('addTrack failed', e);
+        } catch(e) {
+          dbg('❌ Add track failed:', e);
         }
       });
     }
 
     peerConnection.ontrack = (ev) => {
-      dbg('ontrack', ev.track.kind, 'streams:', ev.streams.length);
+      dbg('📥 Received track:', ev.track.kind);
       if (ev.streams && ev.streams.length) {
         ev.streams.forEach(s => s.getTracks().forEach(t => {
           try { 
             if (!remoteStream.getTracks().find(track => track.id === t.id)) {
               remoteStream.addTrack(t); 
-              dbg('added remote track:', t.kind);
+              dbg('✅ Added remote track:', t.kind);
             }
-          } catch(e){
-            dbg('error adding remote track', e);
+          } catch(e) {
+            dbg('❌ Error adding remote track:', e);
           }
         }));
       } else if (ev.track) {
         try { 
           if (!remoteStream.getTracks().find(track => track.id === ev.track.id)) {
             remoteStream.addTrack(ev.track); 
-            dbg('added remote track:', ev.track.kind);
+            dbg('✅ Added remote track:', ev.track.kind);
           }
-        } catch(e){}
+        } catch(e) {}
       }
       document.getElementById('remotePlaceholder').style.display = 'none';
-      addSystemMessage('✓ Receiving friend\'s ' + ev.track.kind);
+      addSystemMessage('✅ Receiving ' + ev.track.kind);
     };
 
     peerConnection.onicecandidate = (ev) => {
@@ -474,18 +536,17 @@ async function createPeerConnection(targetSid) {
     };
 
     peerConnection.onnegotiationneeded = async () => {
-      dbg('onnegotiationneeded triggered');
+      dbg('🤝 Negotiation needed');
       try {
         makingOffer = true;
-        // Tie-break: only lower socket.id creates offer
         if (!(socket.id && targetSid && (socket.id < targetSid))) {
-          dbg('not initiator; skipping offer creation');
+          dbg('⚠️ Not initiator, skipping offer');
           makingOffer = false;
           return;
         }
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
-        dbg('sending offer to', targetSid);
+        dbg('📤 Sending offer to:', targetSid);
         socket.emit('webrtc_offer', { 
           room_code: currentRoom, 
           target_sid: targetSid, 
@@ -493,7 +554,7 @@ async function createPeerConnection(targetSid) {
           sender_sid: socket.id 
         });
       } catch (err) {
-        dbg('negotiation error', err);
+        dbg('❌ Negotiation error:', err);
       } finally {
         makingOffer = false;
       }
@@ -501,7 +562,7 @@ async function createPeerConnection(targetSid) {
 
     peerConnection.onconnectionstatechange = () => {
       const state = peerConnection.connectionState;
-      dbg('pc connectionState:', state);
+      dbg('🔄 Connection state:', state);
       
       if (state === 'connected') {
         addSystemMessage('✅ Video call connected!');
@@ -511,66 +572,63 @@ async function createPeerConnection(targetSid) {
           reconnectTimer = null;
         }
       } else if (state === 'disconnected') {
-        addSystemMessage('⚠ Connection lost - will try to reconnect...');
+        addSystemMessage('⚠️ Connection lost - reconnecting...');
         attemptReconnect();
       } else if (state === 'failed') {
         addSystemMessage('❌ Connection failed - reconnecting...');
         attemptReconnect();
-      } else if (state === 'closed') {
-        dbg('connection closed');
       }
     };
 
     peerConnection.oniceconnectionstatechange = () => {
-      dbg('ice connectionState:', peerConnection.iceConnectionState);
+      dbg('🧊 ICE state:', peerConnection.iceConnectionState);
     };
 
-    // Drain queued ICE candidates
     while (pendingIceCandidates.length) {
       const c = pendingIceCandidates.shift();
       try { 
         await peerConnection.addIceCandidate(new RTCIceCandidate(c)); 
-        dbg('drained queued ICE candidate'); 
-      } catch(e){
-        dbg('drain candidate error', e);
+        dbg('✅ Drained queued ICE candidate'); 
+      } catch(e) {
+        dbg('❌ Drain candidate error:', e);
       }
     }
 
-    dbg('peerConnection ready');
+    dbg('✅ Peer connection ready');
   } catch (err) {
-    dbg('createPeerConnection error', err);
+    dbg('❌ Create peer connection error:', err);
   }
 }
 
 function attemptReconnect() {
   if (!remoteSid || !localStream || reconnectAttempts >= 5) {
     if (reconnectAttempts >= 5) {
-      addSystemMessage('❌ Max reconnect attempts reached. Click "🔄 Reconnect" manually.');
+      addSystemMessage('❌ Max reconnect attempts. Click "🔄 Reconnect".');
     }
     return;
   }
   
   reconnectAttempts++;
-  const delay = Math.min(2000 * reconnectAttempts, 10000); // Progressive backoff
+  const delay = Math.min(2000 * reconnectAttempts, 10000);
   
-  dbg(`Reconnect attempt ${reconnectAttempts} in ${delay}ms`);
-  addSystemMessage(`Reconnecting in ${delay/1000}s... (attempt ${reconnectAttempts}/5)`);
+  dbg(`🔄 Reconnect attempt ${reconnectAttempts} in ${delay}ms`);
+  addSystemMessage(`Reconnecting in ${delay/1000}s... (${reconnectAttempts}/5)`);
   
   if (reconnectTimer) clearTimeout(reconnectTimer);
   reconnectTimer = setTimeout(() => {
-    dbg('Executing reconnect');
+    dbg('🔄 Executing reconnect');
     forceRenegotiate();
   }, delay);
 }
 
 function cleanupPeer() {
-  dbg('cleanupPeer running');
+  dbg('🧹 Cleaning up peer connection');
   if (peerConnection) {
-    try { peerConnection.close(); } catch(e){}
+    try { peerConnection.close(); } catch(e) {}
     peerConnection = null;
   }
   if (remoteStream) {
-    try { remoteStream.getTracks().forEach(t=>t.stop()); } catch(e){}
+    try { remoteStream.getTracks().forEach(t => t.stop()); } catch(e) {}
     remoteStream = null;
   }
   const rv = document.getElementById('remoteVideo');
@@ -586,7 +644,7 @@ function cleanupPeer() {
 /* ---------- CAMERA CONTROL ---------- */
 async function startCamera() {
   try {
-    dbg('startCamera: requesting camera & mic...');
+    dbg('📹 Requesting camera & microphone...');
     localStream = await navigator.mediaDevices.getUserMedia({ 
       video: { width: { ideal: 1280 }, height: { ideal: 720 } }, 
       audio: { 
@@ -600,25 +658,23 @@ async function startCamera() {
     if (localVideo) {
       localVideo.srcObject = localStream;
       localVideo.muted = true;
-      localVideo.play().catch(e => dbg('localVideo.play failed', e));
+      localVideo.play().catch(e => dbg('❌ Local video play failed:', e));
     }
 
-    const sc = document.getElementById('startCameraBtn');
-    const st = document.getElementById('stopCameraBtn');
-    if (sc) sc.style.display = 'none';
-    if (st) st.style.display = 'inline-block';
+    document.getElementById('startCameraBtn').style.display = 'none';
+    document.getElementById('stopCameraBtn').style.display = 'inline-block';
 
     addSystemMessage('✅ Camera and microphone started!');
-    dbg('startCamera: localStream ready, tracks:', localStream.getTracks().map(t => t.kind));
+    dbg('✅ Local stream ready, tracks:', localStream.getTracks().map(t => t.kind).join(', '));
 
     if (remoteSid) {
-      dbg('startCamera: remoteSid exists, will create PC', remoteSid);
+      dbg('📞 Remote peer exists, creating connection...');
       setTimeout(() => createPeerConnection(remoteSid), 1000);
     }
 
     return true;
   } catch (err) {
-    dbg('startCamera error', err);
+    dbg('❌ Camera error:', err);
     alert('Could not access camera/microphone: ' + (err.message || err));
     return false;
   }
@@ -626,11 +682,11 @@ async function startCamera() {
 
 function stopCamera() {
   try {
-    dbg('stopCamera called');
+    dbg('🛑 Stopping camera');
     if (localStream) {
       localStream.getTracks().forEach(track => {
         track.stop();
-        dbg('stopped track:', track.kind);
+        dbg('⏹️ Stopped track:', track.kind);
       });
       localStream = null;
     }
@@ -638,95 +694,91 @@ function stopCamera() {
     const localVideo = document.getElementById('localVideo');
     if (localVideo) localVideo.srcObject = null;
     
-    const sc = document.getElementById('startCameraBtn');
-    const st = document.getElementById('stopCameraBtn');
-    if (sc) sc.style.display = 'inline-block';
-    if (st) st.style.display = 'none';
+    document.getElementById('startCameraBtn').style.display = 'inline-block';
+    document.getElementById('stopCameraBtn').style.display = 'none';
     
     cleanupPeer();
-    addSystemMessage('Camera and mic stopped');
+    addSystemMessage('🛑 Camera and mic stopped');
   } catch (err) {
-    dbg('stopCamera error', err);
+    dbg('❌ Stop camera error:', err);
   }
 }
 
 /* ---------- UI helpers ---------- */
 function addSystemMessage(txt) {
-  dbg('SYS:', txt);
+  dbg('💬', txt);
 }
 
 /* ---------- ROOM / CHAT / VIDEO CONTROL ---------- */
 function joinRoom() {
   if (!socket || !socket.connected) { 
-    alert('Wait for socket to connect'); 
+    alert('⚠️ Wait for socket to connect'); 
     return; 
   }
   const name = document.getElementById('username').value.trim();
-  const rc = (document.getElementById('roomCode').value.trim()) || ('ROOM-'+Math.random().toString(36).slice(2,8).toUpperCase());
+  const rc = (document.getElementById('roomCode').value.trim()) || ('ROOM-' + Math.random().toString(36).slice(2, 8).toUpperCase());
   if (!name) { 
-    alert('Enter your name'); 
+    alert('⚠️ Enter your name'); 
     return; 
   }
   username = name;
-  dbg('joining room:', rc);
+  dbg('🚪 Joining room:', rc, 'as', name);
   socket.emit('join_room', { room_code: rc, username: name });
 }
 
 function loadVideo() {
   const url = document.getElementById('videoUrl').value.trim();
   if (!url || !currentRoom) { 
-    alert('Enter video URL and join room first'); 
+    alert('⚠️ Enter video URL and join room first'); 
     return; 
   }
   const p = document.getElementById('moviePlayer');
   p.src = url; 
   p.load();
   socket.emit('video_load', { room_code: currentRoom, url: url, username: username });
-  addSystemMessage('Video loaded');
+  addSystemMessage('📺 Video loaded');
 }
 
 function syncPlay() {
   if (!currentRoom) { 
-    alert('Join a room first'); 
+    alert('⚠️ Join a room first'); 
     return; 
   }
   const p = document.getElementById('moviePlayer');
   socket.emit('video_play', { room_code: currentRoom, time: p.currentTime, username });
-  try { p.play(); } catch(e) { dbg('play failed', e); }
-  addSystemMessage('Synced play');
+  try { p.play(); } catch(e) { dbg('❌ Play failed:', e); }
+  addSystemMessage('▶️ Synced play');
 }
 
 function syncPause() {
   if (!currentRoom) { 
-    alert('Join a room first'); 
+    alert('⚠️ Join a room first'); 
     return; 
   }
   const p = document.getElementById('moviePlayer');
   socket.emit('video_pause', { room_code: currentRoom, time: p.currentTime, username });
   p.pause();
-  addSystemMessage('Synced pause');
+  addSystemMessage('⏸️ Synced pause');
 }
 
 /* ---------- FORCE RECONNECT ---------- */
 async function forceRenegotiate() {
   if (!remoteSid) { 
-    dbg('Cannot reconnect - no remote peer'); 
-    addSystemMessage('⚠ No friend to connect to');
+    dbg('❌ Cannot reconnect - no remote peer'); 
+    addSystemMessage('⚠️ No friend to connect to');
     return; 
   }
   if (!localStream || !localStream.getTracks().length) {
-    dbg('Cannot reconnect - no local stream');
-    addSystemMessage('⚠ Start camera first!');
+    dbg('❌ Cannot reconnect - no local stream');
+    addSystemMessage('⚠️ Start camera first!');
     return;
   }
   
-  dbg('force reconnect initiated');
+  dbg('🔄 Force reconnect initiated');
   addSystemMessage('🔄 Reconnecting video...');
   
-  // Clean up existing connection
   cleanupPeer();
   
-  // Create new connection after short delay
   setTimeout(() => {
     createPeerConnection(remoteSid);
   }, 500);
@@ -734,14 +786,14 @@ async function forceRenegotiate() {
 
 /* ---------- START ---------- */
 window.addEventListener('load', () => {
+    dbg('🚀 Application starting...');
     initSocket();
     addSystemMessage('✅ Ready! Join a room and start camera.');
     
-    // Auto-fill random username
-    setTimeout(()=>{ 
-        const randomName = 'User' + Math.floor(Math.random()*900);
+    setTimeout(() => { 
+        const randomName = 'User' + Math.floor(Math.random() * 9000 + 1000);
         document.getElementById('username').value = randomName; 
-        dbg('Auto-filled username:', randomName);
+        dbg('👤 Auto-filled username:', randomName);
     }, 300);
 });
 </script>
