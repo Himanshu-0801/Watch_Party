@@ -524,28 +524,23 @@ async function createPeerConnection(targetSid) {
     }
 
     peerConnection.ontrack = (ev) => {
-      dbg('📥 Received track:', ev.track.kind);
-      if (ev.streams && ev.streams.length) {
-        ev.streams.forEach(s => s.getTracks().forEach(t => {
-          try { 
-            if (!remoteStream.getTracks().find(track => track.id === t.id)) {
-              remoteStream.addTrack(t); 
-              dbg('✅ Added remote track:', t.kind);
-            }
-          } catch(e) {
-            dbg('❌ Error adding remote track:', e);
-          }
-        }));
-      } else if (ev.track) {
-        try { 
-          if (!remoteStream.getTracks().find(track => track.id === ev.track.id)) {
-            remoteStream.addTrack(ev.track); 
-            dbg('✅ Added remote track:', ev.track.kind);
-          }
-        } catch(e) {}
+      const remoteVideo = document.getElementById('remoteVideo');
+      
+      // CRITICAL: Directly set srcObject if we have streams
+      if (ev.streams && ev.streams[0]) {
+        remoteVideo.srcObject = ev.streams[0];
+        dbg('✅ Set remote video srcObject directly');
       }
+      
+      // Also add to remoteStream as backup
+      if (!remoteStream.getTracks().find(track => track.id === ev.track.id)) {
+        remoteStream.addTrack(ev.track); 
+        dbg('✅ Added remote track:', ev.track.kind);
+      }
+      
       document.getElementById('remotePlaceholder').style.display = 'none';
       addSystemMessage('✅ Receiving ' + ev.track.kind);
+      dbg('📥 Track:', ev.track.kind);
     };
 
     peerConnection.onicecandidate = (ev) => {
@@ -600,6 +595,13 @@ async function createPeerConnection(targetSid) {
           clearTimeout(reconnectTimer);
           reconnectTimer = null;
         }
+        
+        // ADD THIS: Keep connection alive with periodic ping
+        setInterval(() => {
+          if (peerConnection && peerConnection.connectionState === 'connected') {
+            dbg('❤️ Keepalive ping');
+          }
+        }, 30000); // Every 30 seconds
       } else if (state === 'disconnected') {
         addSystemMessage('⚠️ Connection lost - reconnecting...');
         attemptReconnect();
@@ -638,7 +640,7 @@ function attemptReconnect() {
   }
   
   reconnectAttempts++;
-  const delay = Math.min(2000 * reconnectAttempts, 10000);
+  const delay = Math.min(1000 * reconnectAttempts, 5000); // Faster reconnect
   
   dbg(`🔄 Reconnect attempt ${reconnectAttempts} in ${delay}ms`);
   addSystemMessage(`Reconnecting in ${delay/1000}s... (${reconnectAttempts}/5)`);
