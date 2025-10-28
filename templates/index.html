@@ -355,7 +355,31 @@ function initSocket() {
     addSystemMessage(`👋 ${data.username} joined the room`);
     if (localStream && localStream.getTracks().length) {
       dbg('📹 Local stream ready, creating peer connection...');
-      setTimeout(() => createPeerConnection(remoteSid), 800);
+      setTimeout(() => {
+        createPeerConnection(remoteSid);
+        
+        // MANUALLY trigger offer if we're the initiator
+        setTimeout(() => {
+          if (peerConnection && socket.id < remoteSid) {
+            dbg('🔥 Manually creating offer');
+            peerConnection.createOffer({
+              offerToReceiveAudio: true,
+              offerToReceiveVideo: true
+            }).then(offer => {
+              return peerConnection.setLocalDescription(offer);
+            }).then(() => {
+              socket.emit('webrtc_offer', {
+                room_code: currentRoom,
+                target_sid: remoteSid,
+                offer: peerConnection.localDescription,
+                sender_sid: socket.id
+              });
+              dbg('✅ Manual offer sent');
+            }).catch(err => dbg('❌ Manual offer failed:', err));
+          }
+        }, 1000);
+        
+      }, 800);
     } else {
       addSystemMessage('⚠️ Start camera to connect video');
     }
@@ -539,12 +563,17 @@ async function createPeerConnection(targetSid) {
       dbg('🤝 Negotiation needed');
       try {
         makingOffer = true;
-        if (!(socket.id && targetSid && (socket.id < targetSid))) {
-          dbg('⚠️ Not initiator, skipping offer');
+        const shouldCreateOffer = socket.id < targetSid;
+        if (!shouldCreateOffer) {
+          dbg('⚠️ Not initiator, waiting for offer from peer');
           makingOffer = false;
           return;
         }
-        const offer = await peerConnection.createOffer();
+        
+        const offer = await peerConnection.createOffer({
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: true
+        });
         await peerConnection.setLocalDescription(offer);
         dbg('📤 Sending offer to:', targetSid);
         socket.emit('webrtc_offer', { 
