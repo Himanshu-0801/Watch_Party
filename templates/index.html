@@ -3,181 +3,33 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Watch Party - Debug Build</title>
+<title>Watch Party – Stable Build</title>
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .header {
-            background: rgba(0, 0, 0, 0.3);
-            padding: 20px;
-            text-align: center;
-            color: white;
-            backdrop-filter: blur(10px);
-        }
-
-        .header h1 {
-            font-size: 2em;
-            margin-bottom: 5px;
-        }
-
-        .header p {
-            opacity: 0.9;
-        }
-
-        .connection-status {
-            display: inline-block;
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            margin-top: 8px;
-            font-weight: bold;
-        }
-
-        .connection-status.connected {
-            background: #10b981;
-            color: white;
-        }
-
-        .connection-status.disconnected {
-            background: #ef4444;
-            color: white;
-        }
-
-        .main-container {
-            display: flex;
-            flex: 1;
-            padding: 20px;
-            gap: 20px;
-            max-width: 1800px;
-            margin: 0 auto;
-            width: 100%;
-        }
-
-        .video-section {
-            flex: 2;
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-
-        .movie-player {
-            background: #000;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
-        }
-
-        .movie-player video {
-            width: 100%;
-            display: block;
-            max-height: 500px;
-        }
-
-        .video-chat-container {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 15px;
-        }
-
-        .video-chat-box {
-            background: rgba(0, 0, 0, 0.5);
-            border-radius: 12px;
-            overflow: hidden;
-            position: relative;
-            aspect-ratio: 4/3;
-            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
-        }
-
-        .video-chat-box video {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-
-        .video-label {
-            position: absolute;
-            bottom: 10px;
-            left: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            color: white;
-            padding: 5px 10px;
-            border-radius: 4px;
-            font-size: 12px;
-        }
-
-        .sidebar {
-            flex: 1;
-            min-width: 300px;
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-
-        .debug {
-            background: #fff;
-            border-radius: 10px;
-            padding: 12px;
-            max-height: 600px;
-            overflow: auto;
-            font-family: monospace;
-            font-size: 11px;
-        }
-
-        .controls {
-            display: flex;
-            gap: 8px;
-            margin-top: 8px;
-            flex-wrap: wrap;
-        }
-
-        .btn {
-            padding: 10px 16px;
-            background: #667eea;
-            color: #fff;
-            border-radius: 6px;
-            cursor: pointer;
-            border: none;
-            font-size: 14px;
-        }
-
-        .btn:disabled {
-            background: #94a3b8;
-            cursor: not-allowed;
-        }
-
-        .btn.warn {
-            background: #dc3545;
-        }
-        
-        .btn.orange {
-            background: #ff9800;
-        }
-
-        .input {
-            padding: 10px;
-            border-radius: 6px;
-            border: 2px solid rgba(102, 126, 234, 0.3);
-            font-size: 14px;
-        }
-    </style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:"Segoe UI",sans-serif;background:linear-gradient(135deg,#667eea,#764ba2);min-height:100vh;display:flex;flex-direction:column}
+  .header{background:rgba(0,0,0,.3);color:#fff;text-align:center;padding:20px}
+  .connection-status{display:inline-block;padding:5px 12px;border-radius:20px;font-size:12px;margin-top:8px;font-weight:700}
+  .connected{background:#10b981}.disconnected{background:#ef4444}
+  .main-container{display:flex;flex:1;padding:20px;gap:20px;max-width:1800px;margin:0 auto;width:100%}
+  .video-section{flex:2;display:flex;flex-direction:column;gap:20px}
+  .movie-player{background:#000;border-radius:12px;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.3)}
+  video{width:100%;display:block}
+  .video-chat-container{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:15px}
+  .video-chat-box{background:rgba(0,0,0,.5);border-radius:12px;overflow:hidden;position:relative;aspect-ratio:4/3;box-shadow:0 5px 20px rgba(0,0,0,.3)}
+  .video-label{position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,.7);color:#fff;padding:5px 10px;border-radius:4px;font-size:12px}
+  .sidebar{flex:1;min-width:300px;display:flex;flex-direction:column;gap:20px}
+  .debug{background:#fff;border-radius:10px;padding:12px;max-height:600px;overflow:auto;font-family:monospace;font-size:11px}
+  .controls{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+  .btn{padding:10px 16px;background:#667eea;color:#fff;border-radius:6px;cursor:pointer;border:none;font-size:14px}
+  .btn.warn{background:#dc3545}.btn.orange{background:#ff9800}
+  .input{padding:10px;border-radius:6px;border:2px solid rgba(102,126,234,.3);font-size:14px}
+</style>
 </head>
 <body>
 <div class="header">
-  <h1>🎬 Watch Party — Debug Build</h1>
-  <p>Use two browsers/devices. Watch the log panel for events.</p>
+  <h1>🎬 Watch Party</h1>
+  <p>Open this in two browsers/devices to test</p>
   <div id="connectionStatus" class="connection-status disconnected">● Disconnected</div>
 </div>
 
@@ -185,11 +37,11 @@
   <div class="video-section">
     <div class="movie-player">
       <video id="moviePlayer" controls crossorigin="anonymous"></video>
-      <div style="padding:12px; display:flex; gap:10px; flex-wrap:wrap; background:rgba(0,0,0,0.9);">
-        <button class="btn" onclick="syncPlay()">▶ Sync Play</button>
-        <button class="btn" onclick="syncPause()">⏸ Sync Pause</button>
-        <input id="videoUrl" class="input" style="flex:1; min-width:200px;" placeholder="Enter direct .mp4 URL" />
-        <button class="btn" onclick="loadVideo()">Load URL</button>
+      <div style="padding:12px;background:rgba(0,0,0,.9);display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn" onclick="syncPlay()">▶ Play</button>
+        <button class="btn" onclick="syncPause()">⏸ Pause</button>
+        <input id="videoUrl" class="input" style="flex:1;min-width:200px" placeholder="Enter direct .mp4 URL">
+        <button class="btn" onclick="loadVideo()">Load</button>
       </div>
     </div>
 
@@ -200,633 +52,146 @@
       </div>
       <div class="video-chat-box">
         <video id="remoteVideo" autoplay playsinline></video>
-        <div id="remotePlaceholder" style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:48px; color:#fff;">👤</div>
+        <div id="remotePlaceholder" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:48px;color:#fff">👤</div>
         <div class="video-label">Friend</div>
       </div>
     </div>
 
-    <div style="margin-top:12px;">
-      <div class="controls">
-        <input id="username" class="input" placeholder="Your Name" style="width:150px;" />
-        <input id="roomCode" class="input" placeholder="Room code (optional)" style="width:150px;" />
-        <button class="btn" id="joinRoomBtn" onclick="joinRoom()">Join/Create Room</button>
-        <button class="btn" id="startCameraBtn" onclick="startCamera()" style="display:none">Start Camera & Mic</button>
-        <button class="btn warn" id="stopCameraBtn" onclick="stopCamera()" style="display:none">Stop Camera & Mic</button>
-        <button class="btn orange" onclick="forceRenegotiate()">🔄 Reconnect</button>
-      </div>
+    <div class="controls">
+      <input id="username" class="input" placeholder="Your Name" style="width:150px">
+      <input id="roomCode" class="input" placeholder="Room code" style="width:150px">
+      <button class="btn" id="joinRoomBtn" onclick="joinRoom()">Join/Create Room</button>
+      <button class="btn" id="startCameraBtn" onclick="startCamera()" style="display:none">Start Camera</button>
+      <button class="btn warn" id="stopCameraBtn" onclick="stopCamera()" style="display:none">Stop</button>
+      <button class="btn orange" onclick="forceRenegotiate()">🔄 Reconnect</button>
     </div>
   </div>
 
   <div class="sidebar">
-    <div class="debug" id="debugLog"></div>
-    <div style="margin-top:8px;">
-      <button class="btn" onclick="downloadLogs()" style="width:100%">Download Logs</button>
-    </div>
+    <div id="debugLog" class="debug"></div>
+    <button class="btn" onclick="downloadLogs()">Download Logs</button>
   </div>
 </div>
 
 <script>
-/* ---------- DEBUG LOG HELPERS ---------- */
-const logBuf = [];
-function dbg(...args) {
-  const s = '[' + new Date().toLocaleTimeString() + '] ' + args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
-  logBuf.push(s);
-  const el = document.getElementById('debugLog');
-  if (el) {
-    el.innerText = logBuf.slice(-300).join('\n');
-    el.scrollTop = el.scrollHeight;
-  }
-  console.log(...args);
+/* ========== LOG UTILITIES ========== */
+const logBuf=[];function dbg(...a){const s='['+new Date().toLocaleTimeString()+'] '+a.map(x=>typeof x==='object'?JSON.stringify(x):x).join(' ');logBuf.push(s);const el=document.getElementById('debugLog');if(el){el.innerText=logBuf.slice(-300).join('\n');el.scrollTop=el.scrollHeight;}console.log(...a);}
+function downloadLogs(){const blob=new Blob([logBuf.join('\n')],{type:'text/plain'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='watchparty-logs.txt';a.click();}
+function updateConnectionStatus(ok){const el=document.getElementById('connectionStatus');el.className='connection-status '+(ok?'connected':'disconnected');el.textContent=ok?'● Connected':'● Disconnected';}
+
+/* ========== GLOBALS ========== */
+let socket,peer,localStream,remoteStream,remoteSid,currentRoom,username;
+let makingOffer=false,polite=false;
+const pendingIce=[];
+const config={iceServers:[{urls:'stun:stun.l.google.com:19302'}]};
+
+/* ========== SOCKET SETUP ========== */
+function initSocket(){
+ socket=io({transports:['websocket']});
+ socket.on('connect',()=>{dbg('socket connected',socket.id);updateConnectionStatus(true);});
+ socket.on('disconnect',()=>updateConnectionStatus(false));
+
+ socket.on('room_joined',d=>{dbg('room joined',d);currentRoom=d.room_code;
+   document.getElementById('startCameraBtn').style.display='inline-block';
+   document.getElementById('joinRoomBtn').disabled=true;});
+
+ socket.on('user_joined',d=>{
+   if(d.sid===socket.id)return;
+   remoteSid=d.sid;dbg('user joined',d);
+   if(localStream){createPeer(remoteSid,true);}
+   else dbg('start camera first');
+ });
+
+ socket.on('user_left',()=>{cleanupPeer();});
+
+ socket.on('webrtc_offer',async d=>{
+   dbg('offer recv',d.sender_sid);
+   polite=socket.id>d.sender_sid;
+   if(!peer) await createPeer(d.sender_sid,false);
+   await peer.setRemoteDescription(d.offer);
+   const answer=await peer.createAnswer();
+   await peer.setLocalDescription(answer);
+   socket.emit('webrtc_answer',{room_code:currentRoom,target_sid:d.sender_sid,answer});
+ });
+
+ socket.on('webrtc_answer',async d=>{
+   dbg('answer recv');
+   if(peer) await peer.setRemoteDescription(d.answer);
+ });
+
+ socket.on('webrtc_ice_candidate',async d=>{
+   if(!d.candidate)return;
+   if(peer && peer.remoteDescription) await peer.addIceCandidate(d.candidate);
+   else pendingIce.push(d.candidate);
+ });
+
+ socket.on('video_play',d=>{const v=document.getElementById('moviePlayer');v.currentTime=d.time;v.play();});
+ socket.on('video_pause',d=>{const v=document.getElementById('moviePlayer');v.currentTime=d.time;v.pause();});
+ socket.on('video_load',d=>{const v=document.getElementById('moviePlayer');v.src=d.url;v.load();});
 }
 
-function downloadLogs() {
-  const blob = new Blob([logBuf.join('\n')], { type: 'text/plain' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'watchparty-logs-' + Date.now() + '.txt';
-  a.click();
-  URL.revokeObjectURL(url);
+/* ========== PEER CONNECTION ========== */
+async function createPeer(targetSid,initiator){
+ if(peer){peer.close();}
+ peer=new RTCPeerConnection(config);
+ remoteStream=new MediaStream();
+ document.getElementById('remoteVideo').srcObject=remoteStream;
+
+ localStream?.getTracks().forEach(t=>peer.addTrack(t,localStream));
+ peer.ontrack=e=>{remoteStream.addTrack(e.track);document.getElementById('remotePlaceholder').style.display='none';};
+
+ peer.onicecandidate=e=>{
+   if(e.candidate) socket.emit('webrtc_ice_candidate',{room_code:currentRoom,target_sid:targetSid,candidate:e.candidate});
+ };
+
+ peer.onconnectionstatechange=()=>dbg('pc state',peer.connectionState);
+
+ if(initiator){
+   const offer=await peer.createOffer({offerToReceiveAudio:true,offerToReceiveVideo:true});
+   await peer.setLocalDescription(offer);
+   socket.emit('webrtc_offer',{room_code:currentRoom,target_sid:targetSid,offer});
+ }
+ pendingIce.splice(0).forEach(c=>peer.addIceCandidate(c));
 }
 
-function updateConnectionStatus(connected) {
-  const el = document.getElementById('connectionStatus');
-  if (el) {
-    el.className = 'connection-status ' + (connected ? 'connected' : 'disconnected');
-    el.textContent = connected ? '● Connected' : '● Disconnected';
-  }
+/* ========== CAMERA CONTROL ========== */
+async function startCamera(){
+ try{
+  dbg('getUserMedia');
+  localStream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+  const v=document.getElementById('localVideo');
+  v.srcObject=localStream;v.muted=true;v.play();
+  document.getElementById('startCameraBtn').style.display='none';
+  document.getElementById('stopCameraBtn').style.display='inline-block';
+  if(remoteSid) createPeer(remoteSid,true);
+ }catch(e){alert('Camera error:'+e.message);}
 }
 
-/* ---------- SOCKET & WEBRTC GLOBALS ---------- */
-let socket = null;
-let localStream = null;
-let peerConnection = null;
-let remoteStream = null;
-let username = 'User';
-let currentRoom = null;
-let remoteSid = null;
-let reconnectAttempts = 0;
-let reconnectTimer = null;
-
-/* Negotiation helpers */
-let makingOffer = false;
-let polite = false;
-const pendingIceCandidates = [];
-const configuration = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
-  ],
-  iceCandidatePoolSize: 10
-};
-
-/* ---------- SOCKET INIT ---------- */
-function initSocket() {
-  if (typeof io === 'undefined') {
-    dbg('❌ Socket.IO not loaded');
-    addSystemMessage('❌ Socket.IO library failed to load');
-    return;
-  }
-  
-  dbg('🔌 Initializing socket connection...');
-  
-  // Connect to current origin (works for both local and deployed)
-  socket = io({
-    transports: ['websocket', 'polling'],
-    reconnection: true,
-    reconnectionDelay: 1000,
-    reconnectionDelayMax: 5000,
-    reconnectionAttempts: 5
-  });
-
-  socket.on('connect', () => {
-    dbg('✅ Socket connected! ID:', socket.id);
-    addSystemMessage('✅ Connected to server: ' + socket.id);
-    updateConnectionStatus(true);
-    reconnectAttempts = 0;
-  });
-
-  socket.on('disconnect', (reason) => {
-    dbg('❌ Socket disconnected:', reason);
-    addSystemMessage('❌ Disconnected: ' + reason);
-    updateConnectionStatus(false);
-  });
-
-  socket.on('connect_error', (error) => {
-    dbg('❌ Connection error:', error.message);
-    addSystemMessage('❌ Connection error: ' + error.message);
-    updateConnectionStatus(false);
-  });
-
-  socket.on('reconnect_attempt', (attempt) => {
-    dbg('🔄 Reconnection attempt:', attempt);
-    addSystemMessage('🔄 Reconnecting... (attempt ' + attempt + ')');
-  });
-
-  socket.on('reconnect', (attempt) => {
-    dbg('✅ Reconnected after', attempt, 'attempts');
-    addSystemMessage('✅ Reconnected!');
-    updateConnectionStatus(true);
-  });
-
-  socket.on('connected', (d) => { 
-    dbg('📡 Server connected event:', d); 
-  });
-
-  socket.on('room_joined', (data) => {
-    dbg('🚪 Room joined:', data);
-    currentRoom = data.room_code;
-    addSystemMessage('✅ Joined room: ' + currentRoom);
-    document.getElementById('startCameraBtn').style.display = 'inline-block';
-    document.getElementById('joinRoomBtn').disabled = true;
-  });
-
-  socket.on('user_joined', (data) => {
-    dbg('👋 User joined:', data);
-    if (socket && socket.id && data.sid === socket.id) {
-      dbg('(Ignored own join notification)');
-      return;
-    }
-    remoteSid = data.sid;
-    addSystemMessage(`👋 ${data.username} joined the room`);
-    if (localStream && localStream.getTracks().length) {
-      dbg('📹 Local stream ready, creating peer connection...');
-      setTimeout(() => {
-        createPeerConnection(remoteSid);
-        
-        // MANUALLY trigger offer if we're the initiator
-        setTimeout(() => {
-          if (peerConnection && socket.id < remoteSid) {
-            dbg('🔥 Manually creating offer');
-            peerConnection.createOffer({
-              offerToReceiveAudio: true,
-              offerToReceiveVideo: true
-            }).then(offer => {
-              return peerConnection.setLocalDescription(offer);
-            }).then(() => {
-              socket.emit('webrtc_offer', {
-                room_code: currentRoom,
-                target_sid: remoteSid,
-                offer: peerConnection.localDescription,
-                sender_sid: socket.id
-              });
-              dbg('✅ Manual offer sent');
-            }).catch(err => dbg('❌ Manual offer failed:', err));
-          }
-        }, 1000);
-        
-      }, 800);
-    } else {
-      addSystemMessage('⚠️ Start camera to connect video');
-    }
-  });
-
-  socket.on('user_left', (data) => {
-    dbg('👋 User left:', data);
-    addSystemMessage('👋 User left the room');
-    cleanupPeer();
-  });
-
-  socket.on('chat_message', (d) => dbg('💬 Chat:', d));
-  
-  socket.on('video_play', (d) => { 
-    try { 
-      const p = document.getElementById('moviePlayer'); 
-      if(typeof d.time === 'number') p.currentTime = d.time; 
-      p.play().catch(e => dbg('⚠️ Autoplay blocked:', e)); 
-      addSystemMessage('▶️ Video synced (play)');
-    } catch(e) { dbg('❌ Video play error:', e); }
-  });
-  
-  socket.on('video_pause', (d) => { 
-    try { 
-      const p = document.getElementById('moviePlayer'); 
-      if(typeof d.time === 'number') p.currentTime = d.time; 
-      p.pause(); 
-      addSystemMessage('⏸️ Video synced (pause)');
-    } catch(e) { dbg('❌ Video pause error:', e); }
-  });
-  
-  socket.on('video_load', (d) => { 
-    const p = document.getElementById('moviePlayer'); 
-    p.src = d.url; 
-    p.load(); 
-    addSystemMessage('📺 Video loaded by ' + (d.username || 'someone')); 
-    dbg('📺 Video load:', d); 
-  });
-
-  // WebRTC signaling
-  socket.on('webrtc_offer', async (data) => {
-    dbg('📨 WebRTC offer received from:', data && data.sender_sid);
-    try {
-      const sender = data.sender_sid;
-      if (!sender) { 
-        dbg('❌ Offer has no sender'); 
-        return; 
-      }
-      
-      polite = socket.id > sender;
-      const offerCollision = makingOffer || (peerConnection && peerConnection.signalingState !== 'stable');
-      const shouldIgnore = !polite && offerCollision;
-      
-      if (shouldIgnore) {
-        dbg('⚠️ Ignoring offer due to collision (impolite)');
-        return;
-      }
-      
-      if (!peerConnection) await createPeerConnection(sender);
-      
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
-      dbg('✅ Set remote description from offer');
-      
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-      dbg('✅ Created answer');
-      
-      socket.emit('webrtc_answer', { 
-        room_code: currentRoom, 
-        target_sid: sender, 
-        answer: peerConnection.localDescription, 
-        sender_sid: socket.id 
-      });
-      dbg('📤 Sent answer to:', sender);
-    } catch (err) {
-      dbg('❌ Error handling offer:', err);
-    }
-  });
-
-  socket.on('webrtc_answer', async (data) => {
-    dbg('📨 WebRTC answer received from:', data && data.sender_sid);
-    try {
-      if (!peerConnection) { 
-        dbg('❌ No peer connection for answer'); 
-        return; 
-      }
-      if (peerConnection.signalingState === 'stable') {
-        dbg('⚠️ Already stable, ignoring answer');
-        return;
-      }
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-      dbg('✅ Set remote description from answer');
-    } catch (err) {
-      dbg('❌ Error handling answer:', err);
-    }
-  });
-
-  socket.on('webrtc_ice_candidate', async (data) => {
-    try {
-      if (!data || !data.candidate) return;
-      if (peerConnection && peerConnection.remoteDescription) {
-        await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-        dbg('✅ Added ICE candidate');
-      } else {
-        pendingIceCandidates.push(data.candidate);
-        dbg('📦 Queued ICE candidate');
-      }
-    } catch (err) {
-      dbg('❌ Error adding ICE candidate:', err);
-    }
-  });
+function stopCamera(){localStream?.getTracks().forEach(t=>t.stop());localStream=null;
+ document.getElementById('localVideo').srcObject=null;
+ document.getElementById('startCameraBtn').style.display='inline-block';
+ document.getElementById('stopCameraBtn').style.display='none';
+ cleanupPeer();
 }
 
-/* ---------- CREATE / MANAGE PEER ---------- */
-async function createPeerConnection(targetSid) {
-  try {
-    dbg('🔗 Creating peer connection to:', targetSid);
-    
-    if (peerConnection) {
-      dbg('⚠️ Closing existing connection');
-      peerConnection.close();
-      peerConnection = null;
-    }
-    
-    peerConnection = new RTCPeerConnection(configuration);
-    reconnectAttempts = 0;
+/* ========== VIDEO SYNC ========== */
+function loadVideo(){const url=document.getElementById('videoUrl').value;if(!url||!currentRoom)return alert('Join room first');
+ socket.emit('video_load',{room_code:currentRoom,url,username});document.getElementById('moviePlayer').src=url;}
+function syncPlay(){const v=document.getElementById('moviePlayer');socket.emit('video_play',{room_code:currentRoom,time:v.currentTime});v.play();}
+function syncPause(){const v=document.getElementById('moviePlayer');socket.emit('video_pause',{room_code:currentRoom,time:v.currentTime});v.pause();}
 
-    if (!remoteStream) remoteStream = new MediaStream();
-    const remoteVideo = document.getElementById('remoteVideo');
-    remoteVideo.srcObject = remoteStream;
-    remoteVideo.muted = false;
-
-    if (localStream) {
-      localStream.getTracks().forEach(track => {
-        try { 
-          dbg('➕ Adding track:', track.kind); 
-          peerConnection.addTrack(track, localStream); 
-        } catch(e) {
-          dbg('❌ Add track failed:', e);
-        }
-      });
-    }
-
-    peerConnection.ontrack = (ev) => {
-      const remoteVideo = document.getElementById('remoteVideo');
-      
-      // CRITICAL: Directly set srcObject if we have streams
-      if (ev.streams && ev.streams[0]) {
-        remoteVideo.srcObject = ev.streams[0];
-        dbg('✅ Set remote video srcObject directly');
-      }
-      
-      // Also add to remoteStream as backup
-      if (!remoteStream.getTracks().find(track => track.id === ev.track.id)) {
-        remoteStream.addTrack(ev.track); 
-        dbg('✅ Added remote track:', ev.track.kind);
-      }
-      
-      document.getElementById('remotePlaceholder').style.display = 'none';
-      addSystemMessage('✅ Receiving ' + ev.track.kind);
-      dbg('📥 Track:', ev.track.kind);
-    };
-
-    peerConnection.onicecandidate = (ev) => {
-      if (ev.candidate) {
-        socket.emit('webrtc_ice_candidate', { 
-          room_code: currentRoom, 
-          target_sid: targetSid, 
-          candidate: ev.candidate, 
-          sender_sid: socket.id 
-        });
-      }
-    };
-
-    peerConnection.onnegotiationneeded = async () => {
-      dbg('🤝 Negotiation needed');
-      try {
-        makingOffer = true;
-        const shouldCreateOffer = socket.id < targetSid;
-        if (!shouldCreateOffer) {
-          dbg('⚠️ Not initiator, waiting for offer from peer');
-          makingOffer = false;
-          return;
-        }
-        
-        const offer = await peerConnection.createOffer({
-          offerToReceiveAudio: true,
-          offerToReceiveVideo: true
-        });
-        await peerConnection.setLocalDescription(offer);
-        dbg('📤 Sending offer to:', targetSid);
-        socket.emit('webrtc_offer', { 
-          room_code: currentRoom, 
-          target_sid: targetSid, 
-          offer: peerConnection.localDescription, 
-          sender_sid: socket.id 
-        });
-      } catch (err) {
-        dbg('❌ Negotiation error:', err);
-      } finally {
-        makingOffer = false;
-      }
-    };
-
-    peerConnection.onconnectionstatechange = () => {
-      const state = peerConnection.connectionState;
-      dbg('🔄 Connection state:', state);
-      
-      if (state === 'connected') {
-        addSystemMessage('✅ Video call connected!');
-        reconnectAttempts = 0;
-        if (reconnectTimer) {
-          clearTimeout(reconnectTimer);
-          reconnectTimer = null;
-        }
-        
-        // ADD THIS: Keep connection alive with periodic ping
-        setInterval(() => {
-          if (peerConnection && peerConnection.connectionState === 'connected') {
-            dbg('❤️ Keepalive ping');
-          }
-        }, 30000); // Every 30 seconds
-      } else if (state === 'disconnected') {
-        addSystemMessage('⚠️ Connection lost - reconnecting...');
-        attemptReconnect();
-      } else if (state === 'failed') {
-        addSystemMessage('❌ Connection failed - reconnecting...');
-        attemptReconnect();
-      }
-    };
-
-    peerConnection.oniceconnectionstatechange = () => {
-      dbg('🧊 ICE state:', peerConnection.iceConnectionState);
-    };
-
-    while (pendingIceCandidates.length) {
-      const c = pendingIceCandidates.shift();
-      try { 
-        await peerConnection.addIceCandidate(new RTCIceCandidate(c)); 
-        dbg('✅ Drained queued ICE candidate'); 
-      } catch(e) {
-        dbg('❌ Drain candidate error:', e);
-      }
-    }
-
-    dbg('✅ Peer connection ready');
-  } catch (err) {
-    dbg('❌ Create peer connection error:', err);
-  }
+/* ========== ROOM & RECONNECT ========== */
+function joinRoom(){
+ const name=document.getElementById('username').value.trim()||'User'+Math.floor(Math.random()*9000);
+ const rc=document.getElementById('roomCode').value.trim()||('ROOM-'+Math.random().toString(36).slice(2,8).toUpperCase());
+ username=name;
+ socket.emit('join_room',{room_code:rc,username:name});
 }
+function forceRenegotiate(){if(remoteSid && localStream){createPeer(remoteSid,true);}else alert('Start camera first');}
+function cleanupPeer(){if(peer){peer.close();peer=null;}document.getElementById('remoteVideo').srcObject=null;document.getElementById('remotePlaceholder').style.display='flex';}
 
-function attemptReconnect() {
-  if (!remoteSid || !localStream || reconnectAttempts >= 5) {
-    if (reconnectAttempts >= 5) {
-      addSystemMessage('❌ Max reconnect attempts. Click "🔄 Reconnect".');
-    }
-    return;
-  }
-  
-  reconnectAttempts++;
-  const delay = Math.min(1000 * reconnectAttempts, 5000); // Faster reconnect
-  
-  dbg(`🔄 Reconnect attempt ${reconnectAttempts} in ${delay}ms`);
-  addSystemMessage(`Reconnecting in ${delay/1000}s... (${reconnectAttempts}/5)`);
-  
-  if (reconnectTimer) clearTimeout(reconnectTimer);
-  reconnectTimer = setTimeout(() => {
-    dbg('🔄 Executing reconnect');
-    forceRenegotiate();
-  }, delay);
-}
-
-function cleanupPeer() {
-  dbg('🧹 Cleaning up peer connection');
-  if (peerConnection) {
-    try { peerConnection.close(); } catch(e) {}
-    peerConnection = null;
-  }
-  if (remoteStream) {
-    try { remoteStream.getTracks().forEach(t => t.stop()); } catch(e) {}
-    remoteStream = null;
-  }
-  const rv = document.getElementById('remoteVideo');
-  if (rv) rv.srcObject = null;
-  document.getElementById('remotePlaceholder').style.display = 'flex';
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
-  }
-  reconnectAttempts = 0;
-}
-
-/* ---------- CAMERA CONTROL ---------- */
-async function startCamera() {
-  try {
-    dbg('📹 Requesting camera & microphone...');
-    localStream = await navigator.mediaDevices.getUserMedia({ 
-      video: { width: { ideal: 1280 }, height: { ideal: 720 } }, 
-      audio: { 
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
-      } 
-    });
-
-    const localVideo = document.getElementById('localVideo');
-    if (localVideo) {
-      localVideo.srcObject = localStream;
-      localVideo.muted = true;
-      localVideo.play().catch(e => dbg('❌ Local video play failed:', e));
-    }
-
-    document.getElementById('startCameraBtn').style.display = 'none';
-    document.getElementById('stopCameraBtn').style.display = 'inline-block';
-
-    addSystemMessage('✅ Camera and microphone started!');
-    dbg('✅ Local stream ready, tracks:', localStream.getTracks().map(t => t.kind).join(', '));
-
-    if (remoteSid) {
-      dbg('📞 Remote peer exists, creating connection...');
-      setTimeout(() => createPeerConnection(remoteSid), 1000);
-    }
-
-    return true;
-  } catch (err) {
-    dbg('❌ Camera error:', err);
-    alert('Could not access camera/microphone: ' + (err.message || err));
-    return false;
-  }
-}
-
-function stopCamera() {
-  try {
-    dbg('🛑 Stopping camera');
-    if (localStream) {
-      localStream.getTracks().forEach(track => {
-        track.stop();
-        dbg('⏹️ Stopped track:', track.kind);
-      });
-      localStream = null;
-    }
-    
-    const localVideo = document.getElementById('localVideo');
-    if (localVideo) localVideo.srcObject = null;
-    
-    document.getElementById('startCameraBtn').style.display = 'inline-block';
-    document.getElementById('stopCameraBtn').style.display = 'none';
-    
-    cleanupPeer();
-    addSystemMessage('🛑 Camera and mic stopped');
-  } catch (err) {
-    dbg('❌ Stop camera error:', err);
-  }
-}
-
-/* ---------- UI helpers ---------- */
-function addSystemMessage(txt) {
-  dbg('💬', txt);
-}
-
-/* ---------- ROOM / CHAT / VIDEO CONTROL ---------- */
-function joinRoom() {
-  if (!socket || !socket.connected) { 
-    alert('⚠️ Wait for socket to connect'); 
-    return; 
-  }
-  const name = document.getElementById('username').value.trim();
-  const rc = (document.getElementById('roomCode').value.trim()) || ('ROOM-' + Math.random().toString(36).slice(2, 8).toUpperCase());
-  if (!name) { 
-    alert('⚠️ Enter your name'); 
-    return; 
-  }
-  username = name;
-  dbg('🚪 Joining room:', rc, 'as', name);
-  socket.emit('join_room', { room_code: rc, username: name });
-}
-
-function loadVideo() {
-  const url = document.getElementById('videoUrl').value.trim();
-  if (!url || !currentRoom) { 
-    alert('⚠️ Enter video URL and join room first'); 
-    return; 
-  }
-  const p = document.getElementById('moviePlayer');
-  p.src = url; 
-  p.load();
-  socket.emit('video_load', { room_code: currentRoom, url: url, username: username });
-  addSystemMessage('📺 Video loaded');
-}
-
-function syncPlay() {
-  if (!currentRoom) { 
-    alert('⚠️ Join a room first'); 
-    return; 
-  }
-  const p = document.getElementById('moviePlayer');
-  socket.emit('video_play', { room_code: currentRoom, time: p.currentTime, username });
-  try { p.play(); } catch(e) { dbg('❌ Play failed:', e); }
-  addSystemMessage('▶️ Synced play');
-}
-
-function syncPause() {
-  if (!currentRoom) { 
-    alert('⚠️ Join a room first'); 
-    return; 
-  }
-  const p = document.getElementById('moviePlayer');
-  socket.emit('video_pause', { room_code: currentRoom, time: p.currentTime, username });
-  p.pause();
-  addSystemMessage('⏸️ Synced pause');
-}
-
-/* ---------- FORCE RECONNECT ---------- */
-async function forceRenegotiate() {
-  if (!remoteSid) { 
-    dbg('❌ Cannot reconnect - no remote peer'); 
-    addSystemMessage('⚠️ No friend to connect to');
-    return; 
-  }
-  if (!localStream || !localStream.getTracks().length) {
-    dbg('❌ Cannot reconnect - no local stream');
-    addSystemMessage('⚠️ Start camera first!');
-    return;
-  }
-  
-  dbg('🔄 Force reconnect initiated');
-  addSystemMessage('🔄 Reconnecting video...');
-  
-  cleanupPeer();
-  
-  setTimeout(() => {
-    createPeerConnection(remoteSid);
-  }, 500);
-}
-
-/* ---------- START ---------- */
-window.addEventListener('load', () => {
-    dbg('🚀 Application starting...');
-    initSocket();
-    addSystemMessage('✅ Ready! Join a room and start camera.');
-    
-    setTimeout(() => { 
-        const randomName = 'User' + Math.floor(Math.random() * 9000 + 1000);
-        document.getElementById('username').value = randomName; 
-        dbg('👤 Auto-filled username:', randomName);
-    }, 300);
-});
+/* ========== STARTUP ========== */
+window.addEventListener('load',()=>{initSocket();setTimeout(()=>{document.getElementById('username').value='User'+Math.floor(Math.random()*9000);},200);});
 </script>
 </body>
 </html>
