@@ -212,6 +212,8 @@
         <button class="btn" id="joinRoomBtn" onclick="joinRoom()">Join/Create Room</button>
         <button class="btn" id="startCameraBtn" onclick="startCamera()" style="display:none">Start Camera & Mic</button>
         <button class="btn warn" id="stopCameraBtn" onclick="stopCamera()" style="display:none">Stop Camera & Mic</button>
+        <button class="btn orange" onclick="toggleVideo()">📹 Video</button>
+        <button class="btn orange" onclick="toggleAudio()">🎤 Audio</button>
         <button class="btn orange" onclick="forceRenegotiate()">🔄 Reconnect</button>
       </div>
     </div>
@@ -351,37 +353,15 @@ function initSocket() {
       dbg('(Ignored own join notification)');
       return;
     }
+    // store remote id and create peer connection after a slightly longer delay
     remoteSid = data.sid;
-    addSystemMessage(`👋 ${data.username} joined the room`);
+    addSystemMessage(`👋 ${data.username} joined`);
     if (localStream && localStream.getTracks().length) {
-      dbg('📹 Local stream ready, creating peer connection...');
-      setTimeout(() => {
-        createPeerConnection(remoteSid);
-        
-        // MANUALLY trigger offer if we're the initiator
-        setTimeout(() => {
-          if (peerConnection && socket.id < remoteSid) {
-            dbg('🔥 Manually creating offer');
-            peerConnection.createOffer({
-              offerToReceiveAudio: true,
-              offerToReceiveVideo: true
-            }).then(offer => {
-              return peerConnection.setLocalDescription(offer);
-            }).then(() => {
-              socket.emit('webrtc_offer', {
-                room_code: currentRoom,
-                target_sid: remoteSid,
-                offer: peerConnection.localDescription,
-                sender_sid: socket.id
-              });
-              dbg('✅ Manual offer sent');
-            }).catch(err => dbg('❌ Manual offer failed:', err));
-          }
-        }, 1000);
-        
-      }, 800);
+      dbg('📹 Creating peer connection...');
+      // increase delay to avoid racing manual offer; negotiationhandled by onnegotiationneeded
+      setTimeout(() => createPeerConnection(remoteSid), 1500);
     } else {
-      addSystemMessage('⚠️ Start camera to connect video');
+      addSystemMessage('⚠️ Start camera to connect');
     }
   });
 
@@ -524,23 +504,15 @@ async function createPeerConnection(targetSid) {
     }
 
     peerConnection.ontrack = (ev) => {
+      dbg('📥 Received track:', ev.track.kind);
       const remoteVideo = document.getElementById('remoteVideo');
-      
-      // CRITICAL: Directly set srcObject if we have streams
+      // Set srcObject ONCE from the provided stream (preferred)
       if (ev.streams && ev.streams[0]) {
         remoteVideo.srcObject = ev.streams[0];
-        dbg('✅ Set remote video srcObject directly');
+        dbg('✅ Remote video connected');
+        document.getElementById('remotePlaceholder').style.display = 'none';
+        addSystemMessage('✅ Receiving ' + ev.track.kind);
       }
-      
-      // Also add to remoteStream as backup
-      if (!remoteStream.getTracks().find(track => track.id === ev.track.id)) {
-        remoteStream.addTrack(ev.track); 
-        dbg('✅ Added remote track:', ev.track.kind);
-      }
-      
-      document.getElementById('remotePlaceholder').style.display = 'none';
-      addSystemMessage('✅ Receiving ' + ev.track.kind);
-      dbg('📥 Track:', ev.track.kind);
     };
 
     peerConnection.onicecandidate = (ev) => {
@@ -632,24 +604,23 @@ async function createPeerConnection(targetSid) {
 }
 
 function attemptReconnect() {
-  if (!remoteSid || !localStream || reconnectAttempts >= 5) {
-    if (reconnectAttempts >= 5) {
-      addSystemMessage('❌ Max reconnect attempts. Click "🔄 Reconnect".');
+  // limit attempts and keep logic simple — perform full reconnect sequence
+  if (!remoteSid || !localStream || reconnectAttempts >= 3) {
+    if (reconnectAttempts >= 3) {
+      addSystemMessage('❌ Max attempts. Use Reconnect button.');
     }
     return;
   }
-  
+
   reconnectAttempts++;
-  const delay = Math.min(1000 * reconnectAttempts, 5000); // Faster reconnect
-  
-  dbg(`🔄 Reconnect attempt ${reconnectAttempts} in ${delay}ms`);
-  addSystemMessage(`Reconnecting in ${delay/1000}s... (${reconnectAttempts}/5)`);
-  
+  dbg(`🔄 Reconnect attempt ${reconnectAttempts}`);
+
   if (reconnectTimer) clearTimeout(reconnectTimer);
   reconnectTimer = setTimeout(() => {
-    dbg('🔄 Executing reconnect');
-    forceRenegotiate();
-  }, delay);
+    // cleanup then recreate connection (this will trigger negotiation)
+    cleanupPeer();
+    setTimeout(() => createPeerConnection(remoteSid), 500);
+  }, 2000);
 }
 
 function cleanupPeer() {
@@ -734,6 +705,28 @@ function stopCamera() {
     dbg('❌ Stop camera error:', err);
   }
 }
+
+/* ---------- AUDIO / VIDEO TOGGLES ----------
+function toggleVideo() {
+  if (!localStream) return;
+  const videoTrack = localStream.getVideoTracks()[0];
+  if (videoTrack) {
+    videoTrack.enabled = !videoTrack.enabled;
+    dbg('📹 Video:', videoTrack.enabled ? 'ON' : 'OFF');
+    addSystemMessage(videoTrack.enabled ? '📹 Video on' : '📹 Video off');
+  }
+}
+
+function toggleAudio() {
+  if (!localStream) return;
+  const audioTrack = localStream.getAudioTracks()[0];
+  if (audioTrack) {
+    audioTrack.enabled = !audioTrack.enabled;
+    dbg('🎤 Audio:', audioTrack.enabled ? 'ON' : 'OFF');
+    addSystemMessage(audioTrack.enabled ? '🎤 Audio on' : '🎤 Audio off');
+  }
+}
+// ---------- END toggles ---------- */
 
 /* ---------- UI helpers ---------- */
 function addSystemMessage(txt) {
